@@ -320,6 +320,6 @@ The following is an evented implementation of the previously defined ping actor:
 
 ## License
 
-Copyright (C) 2010 FIXME
+Copyright (C) 2010 Antonio Garrote
 
 Distributed under the Eclipse Public License, the same as Clojure.
