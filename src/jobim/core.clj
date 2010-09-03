@@ -1,5 +1,6 @@
 (ns jobim.core
   (:require [jobim.rabbit :as rabbit]
+            [org.zeromq.clojure :as zmq]
             [jobim.zookeeper :as zk]
             [jobim.utils])
   (:use [jobim.utils]
@@ -63,6 +64,35 @@
   (node-up-notification [this node] :nothing))
 
 
+;; ZeroMQ implementation of the messaging service
+
+(defn node-to-zeromq-socket
+  ([node node-map]
+     (if (nil? (get @node-map node))
+       (let [result (zk/get-data (zk-zeromq-node node))]
+         (if (nil? result)
+           (throw (Exception. (str "The node " node " is not registered as a ZeroMQ node")))
+           (let [ctx (zmq/make-context 1)
+                 socket (zmq/make-socket ctx zmq/+req+)
+                 protocol-string (String. (second result))]
+             (zmq/connect socket protocol-string)
+             (alter node-map (fn [table] (assoc table node socket)))
+             (get @node-map node))))
+       (get @node-map node))))
+
+;{:context ctx :socket socket :node-map (ref {@*node-id* (:protocol-and-port configuration)})}
+(deftype ZeroMQService [*zeromq*] MessagingService
+  (publish [this msg]
+           (let [node (msg-destiny-node msg)
+                 socket (node-to-zeromq-socket node (:node-map *zeromq*))]
+             (zmq/send- socket msg)))
+  (set-messages-queue [this queue]
+                      (future (let [msg (zmq/recv (:socket *zeromq*))]
+                                (.put queue msg))))
+  (node-down-notification [this node] :nothing)
+  (node-up-notification [this node] :nothing))
+
+
 ;; Constructors for the Messaging services
 
 (defmulti make-messaging-service
@@ -78,6 +108,22 @@
        (let [ms (jobim.core.RabbitMQService. rabbit-server)]
          (alter-var-root #'*messaging-service* (fn [_] ms))
          ms))))
+
+(defmethod make-messaging-service :zeromq
+  ([kind configuration]
+     ;; we delete the old node if it exists
+     (when (zk/exists? (zk-zeromq-node @*node-id*))
+       (let [version (:version (second (zk/get-data (zk-zeromq-node @*node-id*))))]
+         (zk/delete (zk-zeromq-node @*node-id* version))))
+     ;; we register the new node
+     (zk/create (zk-zeromq-node @*node-id*) (:protocol-and-port configuration) {:world [:all]} :ephemeral)
+     ;; we establish the connection
+     (let [ctx (zmq/make-context 1 1)
+           socket (zmq/make-socket ctx zmq/+rep+)
+           ms (jobim.core.ZeroMQService {:context ctx :socket socket :node-map (ref {@*node-id* (:protocol-and-port configuration)})})
+           (zmq/bind socket (:protocol-and-port configuration))]
+       (alter-var-root #'*messaging-service* (fn [_] ms))
+       ms)))
 
 ;; protocol
 
