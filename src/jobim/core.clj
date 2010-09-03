@@ -6,10 +6,13 @@
         [clojure.contrib.logging :only [log]]
         [clojure.contrib.json]))
 
-(defonce *rabbit-server* nil)
+(defonce *messaging-service* nil)
 (defonce *node-app-znode* "/jobim")
 (defonce *node-nodes-znode* "/jobim/nodes")
 (defonce *node-processes-znode* "/jobim/processes")
+(defonce *node-messaging-znode* "/jobim/messaging")
+(defonce *node-messaging-rabbitmq-znode* "/jobim/messaging/rabbitmq")
+(defonce *node-messaging-zeromq-znode* "/jobim/messaging/zeromq")
 (defonce *node-names-znode* "/jobim/names")
 (defonce *node-links-znode* "/jobim/links")
 (defonce *pid* nil)
@@ -23,6 +26,59 @@
 (def *links-table* (ref {}))
 (def *node-id* (ref nil))
 
+;; Messaging layer
+
+(declare pid-to-node-id)
+(declare node-channel-id)
+(declare node-exchange-id)
+(declare node-queue-id)
+(declare default-encode)
+
+(defn msg-destiny-node
+  ([msg]
+     (if (= (:topic msg) :rpc)
+       (:node msg)
+       (pid-to-node-id (:to msg)))))
+
+;; Generic messaging protocol
+(defprotocol MessagingService
+  "Abstraction for different messaging systems"
+  (publish [this msg]
+           "Sends the provided message")
+  (set-messages-queue [this queue]
+                      "Accepts an instance of a Queue where incoming messages will be stored")
+  (node-down-notification [this node]
+                          "Receives the notification that a node is down")
+  (node-up-notification [this node]
+                        "Receives the notification that a node is up"))
+
+;; RabbitMQ implementation of the messaging service
+(deftype RabbitMQService [*rabbit-server*] MessagingService
+  (publish [this msg]
+           (let [node (msg-destiny-node msg)]
+             (rabbit/publish *rabbit-server* (node-channel-id @*node-id*) (node-exchange-id node) "msg" (default-encode msg))))
+  (set-messages-queue [this queue] (rabbit/make-consumer *rabbit-server* (node-channel-id @*node-id*) (node-queue-id @*node-id*)
+                                                         (fn [msg] (.put queue msg))))
+  (node-down-notification [this node] :nothing)
+  (node-up-notification [this node] :nothing))
+
+
+;; Constructors for the Messaging services
+
+(defmulti make-messaging-service
+  "Multimethod used to build the different messaging services"
+  (fn [kind configuration] kind))
+
+(defmethod make-messaging-service :rabbitmq
+  ([kind configuration]
+     (let [rabbit-server (apply rabbit/connect configuration)]
+       (rabbit/make-channel rabbit-server (node-channel-id @*node-id*))
+       (rabbit/declare-exchange rabbit-server (node-channel-id @*node-id*) (node-exchange-id @*node-id*))
+       (rabbit/make-queue rabbit-server (node-channel-id @*node-id*) (node-queue-id @*node-id*) (node-exchange-id @*node-id*) "msg")
+       (let [ms (jobim.core.RabbitMQService. rabbit-server)]
+         (alter-var-root #'*messaging-service* (fn [_] ms))
+         ms))))
+
 ;; protocol
 
 (defn protocol-process-msg
@@ -34,10 +90,11 @@
       :content msg}))
 
 (defn protocol-rpc
-  ([from function args should-return internal-id]
+  ([node from function args should-return internal-id]
      {:type :msg
       :topic :rpc
       :from from
+      :node node
       :content {:function      function
                 :args          args
                 :should-return should-return
@@ -101,7 +158,13 @@
         (when (nil? (zk/exists? *node-links-znode*))
           (zk/create *node-links-znode* "/" {:world [:all]} :persistent))
         (when (nil? (zk/exists? *node-processes-znode*))
-          (zk/create *node-processes-znode* "/" {:world [:all]} :persistent)))))
+          (zk/create *node-processes-znode* "/" {:world [:all]} :persistent))
+        (when (nil? (zk/exists? *node-messaging-znode*))
+          (zk/create *node-messaging-znode* "/" {:world [:all]} :persistent))
+        (when (nil? (zk/exists? *node-messaging-rabbitmq-znode*))
+          (zk/create *node-messaging-rabbitmq-znode* "/" {:world [:all]} :persistent))
+        (when (nil? (zk/exists? *node-messaging-zeromq-znode*))
+          (zk/create *node-messaging-zeromq-znode* "/" {:world [:all]} :persistent)))))
 
 (defn json-encode
   "Default encoding of messages"
@@ -135,6 +198,9 @@
 
 (defn zk-link-tx-path
   ([tx-name] (str *node-links-znode* "/" tx-name)))
+
+(defn zk-zeromq-node
+  ([node] (str *node-messaging-zeromq-znode* "/" node)))
 
 (defn add-link
   ([tx-name self-pid remote-pid]
@@ -176,7 +242,7 @@
           (when should-return
             (let [node (pid-to-node-id from)
                   resp (protocol-answer result internal-id)]
-              (rabbit/publish *rabbit-server* (node-channel-id @*node-id*) (node-exchange-id node) "msg" (default-encode resp)))))
+              (publish *messaging-service* resp))))
         (catch Exception ex
           (do
             (log :error (str "Error invoking RPC call" (.getMessage ex) " " (vec (.getStackTrace ex))))))))))
@@ -298,24 +364,18 @@
   "Adds a new node to the distributed application"
   ([file-path] (bootstrap-from-file file-path))
   ([name rabbit-args zookeeper-args]
-     (let [id (random-uuid)
-           ;; connecting to RabbitMQ
-           rc (apply rabbit/connect rabbit-args)]
+     (let [id (random-uuid)]
        ;; store node configuration
        (dosync (alter *node-id* (fn [_] id)))
-       (alter-var-root #'*rabbit-server* (fn [_] rc))
+       ;; initializing the messaging service
+       (make-messaging-service :rabbitmq rabbit-args)
        ;; connecting to ZooKeeper
        (apply zk/connect zookeeper-args)
-       ;; declare queuing components
-       (rabbit/make-channel *rabbit-server* (node-channel-id id))
-       (rabbit/declare-exchange *rabbit-server* (node-channel-id id) (node-exchange-id id))
-       (rabbit/make-queue *rabbit-server* (node-channel-id id) (node-queue-id id) (node-exchange-id id) "msg")
        ;; check application standard znodes
        (check-default-znodes)
        ;; connect messages
        (let [dispatcher-queue (java.util.concurrent.LinkedBlockingQueue.)]
-         (rabbit/make-consumer *rabbit-server* (node-channel-id id) (node-queue-id id)
-                               (fn [msg] (.put dispatcher-queue msg)))
+         (set-messages-queue *messaging-service* dispatcher-queue)
          (dosync (alter *nodes-table* (fn [_] (nodes))))
          (zk/watch-group *node-nodes-znode* (fn [evt] (try (let [node (first (:members evt))]
                                                              (if (= (:kind evt) :member-left)
@@ -443,14 +503,14 @@
                           (= :signal (keyword (:type msg))))
                    msg
                    (protocol-process-msg (self) pid msg))]
-         (rabbit/publish *rabbit-server* (node-channel-id @*node-id*) (node-exchange-id node) "msg" (default-encode msg)))
+         (publish *messaging-service* msg))
        (throw (Exception. (str "Non existent remote process " pid))))))
 
 (defn admin-send
   ([node pid msg]
      (if (zk/exists? (zk-process-path pid))
        (do
-         (rabbit/publish *rabbit-server* (node-channel-id @*node-id*) (node-exchange-id node) "msg" (default-encode msg)))
+         (publish *messaging-service* msg))
        (throw (Exception. (str "Non existent remote process " pid))))))
 
 (defn spawn
@@ -546,16 +606,16 @@
 (defn rpc-call
   "Executes a non blocking RPC call"
   ([node function args]
-     (let [msg (protocol-rpc (self) function args false 0)]
-       (rabbit/publish *rabbit-server* (node-channel-id @*node-id*) (node-exchange-id node) "msg" (default-encode msg)))))
+     (let [msg (protocol-rpc node (self) function args false 0)]
+       (publish *messaging-service* msg))))
 
 (defn rpc-blocking-call
   "Executes a blocking RPC call"
   ([node function args]
      (let [rpc-id (next-rpc-id)
            prom (register-rpc-promise rpc-id)
-           msg (protocol-rpc (self) function args true rpc-id)]
-       (rabbit/publish *rabbit-server* (node-channel-id @*node-id*) (node-exchange-id node) "msg" (default-encode msg))
+           msg (protocol-rpc node (self) function args true rpc-id)]
+       (publish *messaging-service* msg)
        @prom)))
 
 (defn link
