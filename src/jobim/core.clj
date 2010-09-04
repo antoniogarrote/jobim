@@ -29,16 +29,26 @@
 ;; Messaging layer
 
 (declare pid-to-node-id)
-(declare node-channel-id)
-(declare node-exchange-id)
-(declare node-queue-id)
 (declare default-encode)
 
+(defn- node-channel-id
+  ([node-id] (str "node-channel-" node-id)))
+
+(defn- node-exchange-id
+  ([node-id] (str "node-exchange-" node-id)))
+
+(defn- node-queue-id
+  ([node-id] (str "node-queue-" node-id)))
+
+
 (defn msg-destiny-node
+  "Returns the node identifier where the message must be sent"
   ([msg]
-     (if (= (:topic msg) :rpc)
-       (:node msg)
-       (pid-to-node-id (:to msg)))))
+     (if (nil? (:node msg))
+       (if (nil? (:to msg))
+         (throw (Exception. "Message without destinatary PID or node"))
+         (pid-to-node-id (:to msg)))
+       (:node msg))))
 
 ;; Generic messaging protocol
 (defprotocol MessagingService
@@ -46,21 +56,23 @@
   (publish [this msg]
            "Sends the provided message")
   (set-messages-queue [this queue]
-                      "Accepts an instance of a Queue where incoming messages will be stored")
-  (node-down-notification [this node]
-                          "Receives the notification that a node is down")
-  (node-up-notification [this node]
-                        "Receives the notification that a node is up"))
+                      "Accepts an instance of a Queue where incoming messages will be stored"))
 
 ;; RabbitMQ implementation of the messaging service
 (deftype RabbitMQService [*rabbit-server*] MessagingService
+
   (publish [this msg]
            (let [node (msg-destiny-node msg)]
-             (rabbit/publish *rabbit-server* (node-channel-id @*node-id*) (node-exchange-id node) "msg" (default-encode msg))))
-  (set-messages-queue [this queue] (rabbit/make-consumer *rabbit-server* (node-channel-id @*node-id*) (node-queue-id @*node-id*)
-                                                         (fn [msg] (.put queue msg))))
-  (node-down-notification [this node] :nothing)
-  (node-up-notification [this node] :nothing))
+             (rabbit/publish *rabbit-server*
+                             (node-channel-id @*node-id*)
+                             (node-exchange-id node)
+                             "msg"
+                             (default-encode msg))))
+
+  (set-messages-queue [this queue] (rabbit/make-consumer *rabbit-server*
+                                                         (node-channel-id @*node-id*)
+                                                         (node-queue-id @*node-id*)
+                                                         (fn [msg] (.put queue msg)))))
 
 
 ;; Constructors for the Messaging services
@@ -117,9 +129,10 @@
       :content {:cause cause}}))
 
 (defn protocol-answer
-  ([value internal-id]
+  ([node value internal-id]
      {:type :msg
       :topic :rpc-response
+      :node  node
       :content {:value value
                 :internal-id internal-id}}))
 
@@ -136,15 +149,34 @@
 
 ;; utility functions
 
-(defn- node-channel-id
-  ([node-id] (str "node-channel-" node-id)))
+(defn json-encode
+  ([msg]
+     (.getBytes (json-str msg))))
 
-(defn- node-exchange-id
-  ([node-id] (str "node-exchange-" node-id)))
+(defn json-decode
+  ([msg]
+     (read-json (if (string? msg) msg (String. msg)))))
 
-(defn- node-queue-id
-  ([node-id] (str "node-queue-" node-id)))
+(defn java-encode
+  ([obj] (let [bos (java.io.ByteArrayOutputStream.)
+               oos (java.io.ObjectOutputStream. bos)]
+           (.writeObject oos obj)
+           (.close oos)
+           (.toByteArray bos))))
 
+(defn java-decode
+  ([bytes] (let [bis (java.io.ByteArrayInputStream. (if (string? bytes) (.getBytes bytes) bytes))
+                  ois (java.io.ObjectInputStream. bis)
+                  obj (.readObject ois)]
+              (.close ois)
+              obj)))
+
+;; Default encode and decode functions
+
+(defonce default-encode java-encode)
+(defonce default-decode java-decode)
+
+;; ZooKeeper paths
 
 (defn check-default-znodes
   "Creates the default znodes for the distributed application to run"
@@ -165,33 +197,6 @@
           (zk/create *node-messaging-rabbitmq-znode* "/" {:world [:all]} :persistent))
         (when (nil? (zk/exists? *node-messaging-zeromq-znode*))
           (zk/create *node-messaging-zeromq-znode* "/" {:world [:all]} :persistent)))))
-
-(defn json-encode
-  "Default encoding of messages"
-  ([msg]
-     (.getBytes (json-str msg))))
-
-(defn json-decode
-  "Default decoding of messages"
-  ([msg]
-     (read-json (if (string? msg) msg (String. msg)))))
-
-(defn java-encode
-  ([obj] (let [bos (java.io.ByteArrayOutputStream.)
-               oos (java.io.ObjectOutputStream. bos)]
-           (.writeObject oos obj)
-           (.close oos)
-           (.toByteArray bos))))
-
-(defn java-decode
-  ([bytes] (let [bis (java.io.ByteArrayInputStream. (if (string? bytes) (.getBytes bytes) bytes))
-                  ois (java.io.ObjectInputStream. bis)
-                  obj (.readObject ois)]
-              (.close ois)
-              obj)))
-
-(defonce default-encode java-encode)
-(defonce default-decode java-decode)
 
 (defn zk-process-path
   ([pid] (str *node-processes-znode* "/" pid)))
@@ -241,7 +246,7 @@
               result (apply f args)]
           (when should-return
             (let [node (pid-to-node-id from)
-                  resp (protocol-answer result internal-id)]
+                  resp (protocol-answer node result internal-id)]
               (publish *messaging-service* resp))))
         (catch Exception ex
           (do
@@ -384,7 +389,7 @@
                                                                    (dosync (alter *nodes-table* (fn [table] (dissoc table node))))
                                                                    (future (purge-links node-id))))
                                                                (future (dosync (alter *nodes-table* (fn [table] (assoc table node (resolve-node-name node))))))))
-                                                           (catch Exception ex (do (println "ERROR") (println (.getMessage ex)))))))
+                                                           (catch Exception ex (log :error (str  "Error watching nodes" (.getMessage ex) " " (vec (.getStackTrace ex))))))))
          ;; starting main thread
          (.start (Thread. (fn [] (node-dispatcher-thread name id  dispatcher-queue))))
          ;; register zookeeper group
