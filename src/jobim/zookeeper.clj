@@ -249,7 +249,7 @@
 ;; High level operations
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;;; Group membership
+;; Writing of maps
 
 (defn set-map
   "Writes a map under a znode as pairs of children znode key -> value.
@@ -276,6 +276,8 @@
              (when-not (exists? path)
                (create path v acl-map create-mode) )
              (recur (rest children) acl-map create-mode)))))))
+
+;;; Group membership
 
 (defn watch-group
   "Watches changes of members in a group"
@@ -398,7 +400,7 @@
            "commit")))))
 
 (defn rollback
-  "Roolbacks in the 2-phase-commit protocol"
+  "Rollbacks in the 2-phase-commit protocol"
   ([tx-name tx-rollback]
      ;; Throw exception if there is no running transaction
      (when (nil? (exists? tx-name)) (throw (Exception. "Non existant transaction")))
