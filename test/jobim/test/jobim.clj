@@ -4,20 +4,36 @@
   (:use [clojure.test]))
 
 
+(defonce *messaging-to-test* :rabbitmq)
 
 (println "*********************************************************************************************")
-(println "***********      To run these tests an instance of Zookeeper, RabbitMQ 2.0          *********")
+(if (= *messaging-to-test* :rabbitmq)
+  (println "***********      To run these tests an instance of Zookeeper, RabbitMQ 2.0          *********")
+  (println "***********      To run these tests an instance of Zookeeper                        *********"))
 (println "***********      and a remote node correctly configured must be running             *********")
 (println "*********************************************************************************************")
 
+
+(if (= *messaging-to-test* :rabbitmq)
+  (println "\n\n\n             testing RABBITMQ communication layer                      \n\n\n" )
+  (println "\n\n\n             testing ZEROMQ communication layer                      \n\n\n" ))
+
+
 (defonce *remote-node-name* "remote-test")
 (defonce *local-node-name* "local-test")
-(defonce *test-node-config* {:node-name "local-test"
-                             :rabbit-options []
-                             :zookeeper-options ["localhost:2181" {:timeout 3000}]})
+(if (= *messaging-to-test* :rabbitmq)
+  (defonce *test-node-config* {:node-name "local-test"
+                               :messaging-type :rabbitmq
+                               :messaging-options {:host "localhost"}
+                               :zookeeper-options ["localhost:2181" {:timeout 3000}]})
+  (defonce *test-node-config* {:node-name "local-test"
+                               :messaging-type :zeromq
+                               :messaging-options {:protocol-and-port "tcp://192.168.1.35:5554"}
+                               :zookeeper-options ["localhost:2181" {:timeout 3000}]}))
+
 (defonce *test-node-name*  "local-test")
 
-(bootstrap-node (:node-name *test-node-config*) (:rabbit-options *test-node-config*) (:zookeeper-options *test-node-config*))
+(jobim.core/bootstrap-node (:node-name *test-node-config*) (:messaging-type *test-node-config*) (:messaging-options *test-node-config*) (:zookeeper-options *test-node-config*))
 
 (spawn-in-repl)
 

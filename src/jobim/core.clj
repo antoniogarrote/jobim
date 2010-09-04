@@ -31,6 +31,7 @@
 
 (declare pid-to-node-id)
 (declare default-encode)
+(declare default-decode)
 
 (defn- node-channel-id
   ([node-id] (str "node-channel-" node-id)))
@@ -73,7 +74,7 @@
   (set-messages-queue [this queue] (rabbit/make-consumer *rabbit-server*
                                                          (node-channel-id @*node-id*)
                                                          (node-queue-id @*node-id*)
-                                                         (fn [msg] (.put queue msg)))))
+                                                         (fn [msg] (.put queue (default-decode msg))))))
 
 
 ;; ZeroMQ implementation of the messaging service
@@ -85,22 +86,28 @@
          (if (nil? result)
            (throw (Exception. (str "The node " node " is not registered as a ZeroMQ node")))
            (let [ctx (zmq/make-context 1)
-                 socket (zmq/make-socket ctx zmq/+req+)
-                 protocol-string (String. (second result))]
+                 socket (zmq/make-socket ctx zmq/+downstream+)
+                 protocol-string (String. (first result))]
              (zmq/connect socket protocol-string)
-             (alter node-map (fn [table] (assoc table node socket)))
+             (log :debug (str "*** created downstream socket: " socket " protocol: " protocol-string))
+             (dosync (alter node-map (fn [table] (assoc table node socket))))
              (get @node-map node))))
        (get @node-map node))))
 
-;{:context ctx :socket socket :node-map (ref {@*node-id* (:protocol-and-port configuration)})}
 (deftype ZeroMQService [*zeromq*] MessagingService
   (publish [this msg]
            (let [node (msg-destiny-node msg)
                  socket (node-to-zeromq-socket node (:node-map *zeromq*))]
-             (zmq/send- socket msg)))
+             (log :debug (str "*** publishing to socket " socket " and node " node))
+             (log :debug (str "*** msg: " msg))
+             (let [result (zmq/send- socket (default-encode msg) zmq/+noblock+)]
+               (log :debug (str "*** publish result: " result))
+               :ok)))
   (set-messages-queue [this queue]
-                      (future (let [msg (zmq/recv (:socket *zeromq*))]
-                                (.put queue msg)))))
+                      (future (loop [msg (zmq/recv (:socket *zeromq*))]
+                                (log :debug (str "*** retrieved msg " msg))
+                                (.put queue (default-decode msg))
+                                (recur (zmq/recv (:socket *zeromq*)))))))
 
 
 ;; Constructors for the Messaging services
@@ -111,13 +118,15 @@
 
 (defmethod make-messaging-service :rabbitmq
   ([kind configuration]
-     (let [rabbit-server (apply rabbit/connect configuration)]
+     (let [rabbit-server (apply rabbit/connect [configuration])]
        (rabbit/make-channel rabbit-server (node-channel-id @*node-id*))
        (rabbit/declare-exchange rabbit-server (node-channel-id @*node-id*) (node-exchange-id @*node-id*))
        (rabbit/make-queue rabbit-server (node-channel-id @*node-id*) (node-queue-id @*node-id*) (node-exchange-id @*node-id*) "msg")
        (let [ms (jobim.core.RabbitMQService. rabbit-server)]
          (alter-var-root #'*messaging-service* (fn [_] ms))
          ms))))
+
+(defonce *zmq-default-io-threads* 10)
 
 (defmethod make-messaging-service :zeromq
   ([kind configuration]
@@ -128,9 +137,12 @@
      ;; we register the new node
      (zk/create (zk-zeromq-node @*node-id*) (:protocol-and-port configuration) {:world [:all]} :ephemeral)
      ;; we establish the connection
-     (let [ctx (zmq/make-context 1 1)
-           socket (zmq/make-socket ctx zmq/+rep+)
-           ms (jobim.core.ZeroMQService {:context ctx :socket socket :node-map (ref {@*node-id* (:protocol-and-port configuration)})})]
+     (let [ctx (zmq/make-context 1)
+           socket (zmq/make-socket ctx zmq/+upstream+)
+           downstream-socket (zmq/make-socket ctx zmq/+downstream+)
+           _ (zmq/connect downstream-socket (:protocol-and-port configuration))
+           ms (jobim.core.ZeroMQService. {:context ctx :socket socket :node-map (ref {@*node-id* downstream-socket})
+                                          :io-threads (or (:io-threads configuration) *zmq-default-io-threads*)})]
        (zmq/bind socket (:protocol-and-port configuration))
        (alter-var-root #'*messaging-service* (fn [_] ms))
        ms)))
@@ -391,11 +403,10 @@
        (let [msg (.take queue)]
          (try
           (do
-            (let [msg (default-decode msg)]
-              (condp = (keyword (:type msg))
-                :msg (dispatch-msg msg)
-                :signal (dispatch-signal msg)
-                (log :error (str "*** " name " , " (java.util.Date.) " uknown message type for : " msg)))))
+            (condp = (keyword (:type msg))
+              :msg (dispatch-msg msg)
+              :signal (dispatch-signal msg)
+              (log :error (str "*** " name " , " (java.util.Date.) " uknown message type for : " msg))))
           (catch Exception ex (log :error (str "***  " name " , " (java.util.Date.) " error processing message : " msg " --> " (.getMessage ex)))))
          (recur true queue)))))
 
@@ -404,7 +415,7 @@
 (defn- bootstrap-from-file
   ([file-path]
      (let [config (eval (read-string (slurp file-path)))]
-       (bootstrap-node (:node-name config) (:rabbit-options config) (:zookeeper-options config)))))
+       (bootstrap-node (:node-name config) (:messaging-type config) (:messaging-options config) (:zookeeper-options config)))))
 
 (declare purge-links)
 (declare resolve-node-name)
@@ -412,14 +423,19 @@
 (defn bootstrap-node
   "Adds a new node to the distributed application"
   ([file-path] (bootstrap-from-file file-path))
-  ([name rabbit-args zookeeper-args]
+  ([name messaging-type messaging-args zookeeper-args]
+     (println (str "\n ** Jobim node started ** \n\n"
+                   "\n - node-name: " name
+                   "\n - messaging-type " messaging-type
+                   "\n - messaging-args " messaging-args
+                   "\n - zookeeper-args " zookeeper-args "\n\n"))
      (let [id (random-uuid)]
        ;; store node configuration
        (dosync (alter *node-id* (fn [_] id)))
-       ;; initializing the messaging service
-       (make-messaging-service :rabbitmq rabbit-args)
        ;; connecting to ZooKeeper
        (apply zk/connect zookeeper-args)
+       ;; initializing the messaging service
+       (make-messaging-service messaging-type messaging-args)
        ;; check application standard znodes
        (check-default-znodes)
        ;; connect messages

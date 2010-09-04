@@ -8,7 +8,8 @@
                                               com.sun.jmx/jmxri]]
                  [matchure "0.9.1"]
                  [com.rabbitmq/amqp-client "2.0.0"]
-                 [clojure-zmq "2.0.7-SNAPSHOT"]
+                 [org.clojars.mikejs/clojure-zmq "2.0.7-SNAPSHOT"]
+                 [org.zmq/jzmq "2.0.6-SNAPSHOT"]
                  [org.apache.zookeeper/zookeeper "3.3.1"]]
   :dev-dependencies [[leiningen/lein-swank "1.2.0-SNAPSHOT"]]
   :native-path "/usr/local/lib"
