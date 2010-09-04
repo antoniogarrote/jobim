@@ -77,7 +77,7 @@
 
 
 ;; ZeroMQ implementation of the messaging service
-
+(declare zk-zeromq-node)
 (defn node-to-zeromq-socket
   ([node node-map]
      (if (nil? (get @node-map node))
@@ -100,9 +100,7 @@
              (zmq/send- socket msg)))
   (set-messages-queue [this queue]
                       (future (let [msg (zmq/recv (:socket *zeromq*))]
-                                (.put queue msg))))
-  (node-down-notification [this node] :nothing)
-  (node-up-notification [this node] :nothing))
+                                (.put queue msg)))))
 
 
 ;; Constructors for the Messaging services
@@ -132,8 +130,8 @@
      ;; we establish the connection
      (let [ctx (zmq/make-context 1 1)
            socket (zmq/make-socket ctx zmq/+rep+)
-           ms (jobim.core.ZeroMQService {:context ctx :socket socket :node-map (ref {@*node-id* (:protocol-and-port configuration)})})
-           (zmq/bind socket (:protocol-and-port configuration))]
+           ms (jobim.core.ZeroMQService {:context ctx :socket socket :node-map (ref {@*node-id* (:protocol-and-port configuration)})})]
+       (zmq/bind socket (:protocol-and-port configuration))
        (alter-var-root #'*messaging-service* (fn [_] ms))
        ms)))
 
