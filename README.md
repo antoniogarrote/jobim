@@ -20,7 +20,7 @@ native jni library.
 Basic usage
 -----------
 
- - starting a node : jobim/bootstrap-node
+### starting a node : jobim/bootstrap-node
 
  A path to a configuration file must be provided.
  The path must include the name of the node, the
@@ -43,7 +43,7 @@ Basic usage
      :zookeeper-options ["localhost:2181" {:timeout 3000}]}
 
 
- - Checking available nodes : jobim/nodes jobim/resolve-node-name
+### Checking available nodes : jobim/nodes jobim/resolve-node-name
 
 The nodes function returns a map with all the node names and their identifiers.
 The function resolve-node-name can be used to retrieve the indetifier of a node
@@ -57,7 +57,7 @@ provided its name.
 > {"osx" "5299491ea4184c02ad8c0fbc100c49f9", "linux" "6811651bd83e4d428359b419e7f76a75"}
 
 
-  - Agent creation : jobim/spawn
+### Agent creation : jobim/spawn
 
 We can define an actor using any Clojure function and the spawn function.
 
@@ -79,12 +79,12 @@ Creation of the actor:
 
 >
 > => (def \*pid\* (spawn examples/ping))
-> #'clojure.core/\*pid\*
+> \#'clojure.core/\*pid\*
 > => \*pid\*
 > "5299491ea4184c02ad8c0fbc100c49f9.1"
 
 
-  - Transforming a thread into an actor : jobim/spawn-in-repl
+### Transforming a thread into an actor : jobim/spawn-in-repl
 
 The REPL or any other thread can become an actor calling spawn-in-repl from the
 code being executed in the thread:
@@ -96,7 +96,7 @@ code being executed in the thread:
 > => (receive)
 > 13123
 
-  - Sending and receiving : jobim/send! jobim/receive
+### Sending and receiving : jobim/send! jobim/receive
 
 This couple of function can be used to send and receive messages to and from
 actors. The PID of the actor must be provided.
@@ -109,7 +109,7 @@ By default, any serializable java object can be send and retrieved.
 > #<Date Fri Sep 03 13:20:26 CEST 2010>
 
 
-  - RPC calls : jobim/rpc-call jobim/rpc-blocking-call
+### RPC calls : jobim/rpc-call jobim/rpc-blocking-call
 
 Used to execute a function call in a remote node.
 They can be used to spawn remote actors and retrieve the PID (using the
@@ -127,7 +127,7 @@ Spawning a remote actor:
 
 
 > => (def \*pid\* (rpc-blocking-call (resolve-node-name "linux") "jobim/spawn" ["jobim.examples.actors/ping"]))
-> #'clojure.core/\*pid\*
+> \#'clojure.core/\*pid\*
 > => \*pid\*
 > "6811651bd83e4d428359b419e7f76a75.1"
 > => (send! \*pid\* [(self) 345])
@@ -136,7 +136,7 @@ Spawning a remote actor:
 > 345
 
 
-  _ Registering PIDs : jobim/register-name jobim/registered-names jobim/resolve-name
+### Registering PIDs : jobim/register-name jobim/registered-names jobim/resolve-name
 
 An actor can be registered with a globally available name using the register-name
 function.
@@ -145,7 +145,7 @@ All registered names can be retrieved with the registered-names function.
 To transform an actor name into a PID the resolve-name function can be used.
 
 > => (def \*ping\* (spawn examples/ping))
-> #'clojure.core/\*ping\*
+> \#'clojure.core/\*ping\*
 > => \*ping\*
 > "5299491ea4184c02ad8c0fbc100c49f9.8"
 > => (register-name "ping" \*ping*)
@@ -159,7 +159,7 @@ To transform an actor name into a PID the resolve-name function can be used.
 > => (receive)
 > 1234
 
-  - Error notifications : jobim/link
+### Error notifications : jobim/link
 
 Two actors can be linked using the link function. From that moment onwards if one of the actors
 dies because of an exception or the node where it is being executed becomes unavailable due to
@@ -169,7 +169,7 @@ a network partition, the other actor will receive a special message containing a
 > => (self)
 > "5299491ea4184c02ad8c0fbc100c49f9.1"
 > => (def \*pid\* (spawn examples/ping))
-> #'clojure.core/\*pid\*
+> \#'clojure.core/\*pid\*
 > => (link \*pid\*)
 > {"5299491ea4184c02ad8c0fbc100c49f9.1" ["5299491ea4184c02ad8c0fbc100c49f9.9"],
 > "5299491ea4184c02ad8c0fbc100c49f9.9" ["5299491ea4184c02ad8c0fbc100c49f9.1"]}
@@ -182,7 +182,7 @@ a network partition, the other actor will receive a special message containing a
 >  :cause "class java.lang.Exception:Ping actor received exception"}
 
 
-   - Threadless actors : jobim/spawn-evented jobim/react-loop jobim/react
+### Threadless actors : jobim/spawn-evented jobim/react-loop jobim/react
 
 To avoid the limitation on the number of java threads that can be created in a single java VM, an
 evented actor can be created not attached to a single thread.
@@ -226,10 +226,10 @@ To run the tests follow the next instructions:
 > \*\* Jobim node started \*\*
 >
 >
-> - node-name: remote-test
-> - messaging-type :rabbitmq
-> - messaging-args {:host "192.168.1.35"}
-> - zookeeper-args ["192.168.1.35:2181" {:timeout 3000}
+> \- node-name: remote-test
+> \- messaging-type :rabbitmq
+> \- messaging-args {:host "192.168.1.35"}
+> \- zookeeper-args ["192.168.1.35:2181" {:timeout 3000}
 >
 > clojure.core=>
 
