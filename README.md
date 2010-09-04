@@ -50,10 +50,15 @@ The function resolve-node-name can be used to retrieve the indetifier of a node
 provided its name.
 
 > => (use 'jobim)
+
 > nil
+
 > => (bootstrap-node "node-config.clj")
+
 > "6811651bd83e4d428359b419e7f76a75"
+
 > => (nodes)
+
 > {"osx" "5299491ea4184c02ad8c0fbc100c49f9", "linux" "6811651bd83e4d428359b419e7f76a75"}
 
 
@@ -77,10 +82,12 @@ We can define an actor using any Clojure function and the spawn function.
 
 Creation of the actor:
 
->
 > => (def \*pid\* (spawn examples/ping))
+
 > \#'clojure.core/\*pid\*
+
 > => \*pid\*
+
 > "5299491ea4184c02ad8c0fbc100c49f9.1"
 
 
@@ -90,10 +97,15 @@ The REPL or any other thread can become an actor calling spawn-in-repl from the
 code being executed in the thread:
 
 > => (spawn-in-repl)
+
 > "5299491ea4184c02ad8c0fbc100c49f9.2"
+
 > => (send! \*pid\* [(self) 13123])
+
 > :ok
+
 > => (receive)
+
 > 13123
 
 ### Sending and receiving : jobim/send! jobim/receive
@@ -105,7 +117,9 @@ By default, any serializable java object can be send and retrieved.
 
 > => (send! *pid* [(self) (java.util.Date.)])
 > :ok
+
 > => (receive)
+
 > #<Date Fri Sep 03 13:20:26 CEST 2010>
 
 
@@ -117,22 +131,34 @@ blocking variant).
 
 
 > => (nodes)
+
 > {"osx" "5299491ea4184c02ad8c0fbc100c49f9", "linux" "6811651bd83e4d428359b419e7f76a75"}
+
 > => (resolve-node-name "linux")
+
 > "6811651bd83e4d428359b419e7f76a75"
+
 > => (rpc-blocking-call (resolve-node-name "linux") "clojure.core/+" [1 2 3 4 5])
+
 > 15
 
 Spawning a remote actor:
 
 
 > => (def \*pid\* (rpc-blocking-call (resolve-node-name "linux") "jobim/spawn" ["jobim.examples.actors/ping"]))
+
 > \#'clojure.core/\*pid\*
+
 > => \*pid\*
+
 > "6811651bd83e4d428359b419e7f76a75.1"
+
 > => (send! \*pid\* [(self) 345])
+
 > nil
+
 > => (receive)
+
 > 345
 
 
@@ -145,18 +171,31 @@ All registered names can be retrieved with the registered-names function.
 To transform an actor name into a PID the resolve-name function can be used.
 
 > => (def \*ping\* (spawn examples/ping))
+
 > \#'clojure.core/\*ping\*
+
 > => \*ping\*
+
 > "5299491ea4184c02ad8c0fbc100c49f9.8"
+
 > => (register-name "ping" \*ping*)
+
 > :ok
+
 > => (registered-names)
+
 > {"ping" "5299491ea4184c02ad8c0fbc100c49f9.8"}
+
 > => (resolve-name "ping")
+
 > "5299491ea4184c02ad8c0fbc100c49f9.8"
+
 > => (send! (resolve-name "ping") [(self) 1234])
+
 > :ok
+
 > => (receive)
+
 > 1234
 
 ### Error notifications : jobim/link
@@ -167,17 +206,28 @@ a network partition, the other actor will receive a special message containing a
 
 
 > => (self)
+
 > "5299491ea4184c02ad8c0fbc100c49f9.1"
+
 > => (def \*pid\* (spawn examples/ping))
+
 > \#'clojure.core/\*pid\*
+
 > => (link \*pid\*)
+
 > {"5299491ea4184c02ad8c0fbc100c49f9.1" ["5299491ea4184c02ad8c0fbc100c49f9.9"],
 > "5299491ea4184c02ad8c0fbc100c49f9.9" ["5299491ea4184c02ad8c0fbc100c49f9.1"]}
+
 > => ; the ping actor will throw an exception if receives a message containing the
+
 > "exception" string
+
 > => (send! \*pid* "exception")
+
 > :ok
+
 > => (receive)
+
 > {:signal :link-broken, :from "5299491ea4184c02ad8c0fbc100c49f9.9",
 >  :cause "class java.lang.Exception:Ping actor received exception"}
 
@@ -222,15 +272,17 @@ To run the tests follow the next instructions:
  - Start the test node that will execute the test-node.clj configuration:
 
 > $ java -cp jobim-0.0.4-SNAPSHOT-standalone.jar -Djava.library.path=/usr/local/lib jobim.main test-node.clj
->
+
 > \*\* Jobim node started \*\*
->
->
+
 > \- node-name: remote-test
+
 > \- messaging-type :rabbitmq
+
 > \- messaging-args {:host "192.168.1.35"}
+
 > \- zookeeper-args ["192.168.1.35:2181" {:timeout 3000}
->
+
 > clojure.core=>
 
   - Run the tests using

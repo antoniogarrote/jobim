@@ -79,33 +79,37 @@
 
 ;; ZeroMQ implementation of the messaging service
 (declare zk-zeromq-node)
+
 (defn node-to-zeromq-socket
   ([node node-map]
      (if (nil? (get @node-map node))
        (let [result (zk/get-data (zk-zeromq-node node))]
          (if (nil? result)
            (throw (Exception. (str "The node " node " is not registered as a ZeroMQ node")))
-           (let [ctx (zmq/make-context 1)
+           (let [ctx (zmq/make-context 10)
                  socket (zmq/make-socket ctx zmq/+downstream+)
                  protocol-string (String. (first result))]
              (zmq/connect socket protocol-string)
              (log :debug (str "*** created downstream socket: " socket " protocol: " protocol-string))
              (dosync (alter node-map (fn [table] (assoc table node socket))))
-             (get @node-map node))))
+             socket)))
        (get @node-map node))))
 
 (deftype ZeroMQService [*zeromq*] MessagingService
   (publish [this msg]
            (let [node (msg-destiny-node msg)
                  socket (node-to-zeromq-socket node (:node-map *zeromq*))]
-             (log :debug (str "*** publishing to socket " socket " and node " node))
+             (log :debug(str "*** publishing to socket " socket " and node " node))
              (log :debug (str "*** msg: " msg))
-             (let [result (zmq/send- socket (default-encode msg) zmq/+noblock+)]
+             (let [result (zmq/send- socket (default-encode msg))]
                (log :debug (str "*** publish result: " result))
+               ;; @todo jzmq bug?
+               ;; without this delay messages can be drop
+               (Thread/sleep 120)
                :ok)))
   (set-messages-queue [this queue]
                       (future (loop [msg (zmq/recv (:socket *zeromq*))]
-                                (log :debug (str "*** retrieved msg " msg))
+                                (log :debug (str "*** retrieved msg " (default-decode msg)))
                                 (.put queue (default-decode msg))
                                 (recur (zmq/recv (:socket *zeromq*)))))))
 
@@ -612,7 +616,9 @@
 
 (defn self
   "Returns the pid of the current process"
-  ([] *pid*))
+  ([] (if (nil? *pid*)
+        (throw (Exception. "The current thread doest not have an associated PID"))
+        *pid*)))
 
 (defn send!
   "Sends a message to a local/remote process"

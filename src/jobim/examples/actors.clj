@@ -29,7 +29,7 @@
   ([]
      (loop []
        (let [[from data] (receive)]
-           (send! from [(self) data])
+           (send! from [(self) (inc data)])
            (recur)))))
 
 (defn ping-benchmarking-evented
