@@ -91,21 +91,19 @@
                  protocol-string (String. (first result))]
              (zmq/connect socket protocol-string)
              (log :debug (str "*** created downstream socket: " socket " protocol: " protocol-string))
-             (dosync (alter node-map (fn [table] (assoc table node socket))))
-             socket)))
+             (let [ag-socket (agent socket)]
+             (dosync (alter node-map (fn [table] (assoc table node ag-socket))))
+             ag-socket))))
        (get @node-map node))))
 
 (deftype ZeroMQService [*zeromq*] MessagingService
   (publish [this msg]
            (let [node (msg-destiny-node msg)
                  socket (node-to-zeromq-socket node (:node-map *zeromq*))]
-             (log :debug(str "*** publishing to socket " socket " and node " node))
-             (log :debug (str "*** msg: " msg))
-             (let [result (zmq/send- socket (default-encode msg))]
+             (log :debug (str "*** publishing to socket " @socket " and node " node " msg " msg))
+             (let [result (do (send-off socket (fn [sock] (do (zmq/send- sock (default-encode msg)) sock))))]
+               (await socket)
                (log :debug (str "*** publish result: " result))
-               ;; @todo jzmq bug?
-               ;; without this delay messages can be drop
-               (Thread/sleep 120)
                :ok)))
   (set-messages-queue [this queue]
                       (future (loop [msg (zmq/recv (:socket *zeromq*))]
@@ -141,7 +139,7 @@
      ;; we register the new node
      (zk/create (zk-zeromq-node @*node-id*) (:protocol-and-port configuration) {:world [:all]} :ephemeral)
      ;; we establish the connection
-     (let [ctx (zmq/make-context 1)
+     (let [ctx (zmq/make-context 10)
            socket (zmq/make-socket ctx zmq/+upstream+)
            downstream-socket (zmq/make-socket ctx zmq/+downstream+)
            _ (zmq/connect downstream-socket (:protocol-and-port configuration))
