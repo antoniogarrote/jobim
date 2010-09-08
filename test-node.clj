@@ -8,5 +8,5 @@
 
 {:node-name "remote-test"
  :messaging-type :rabbitmq
- :messaging-options {:host "192.168.1.35"}
- :zookeeper-options ["192.168.1.35:2181" {:timeout 3000}]}
+ :messaging-options {:host "172.21.1.237"}
+ :zookeeper-options ["172.21.1.237:2181" {:timeout 3000}]}

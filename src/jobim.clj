@@ -79,9 +79,24 @@
   ([f]
      (apply core/react [f])))
 
-(defmacro react-loop
-  "An infinite execution loop for an evented actor"
-  ([& body]
-     `(let [c# (fn []
-                ~@body)]
-        (with-meta {:loop c#} {:evented true}))))
+(defn react-loop
+  "Creates an evented loop in an actor description"
+  ([initial-vals f]
+     (apply core/react-loop [initial-vals f])))
+
+(defn react-future
+  "Handles some blocking operation in an evented actor"
+  ([action handler]
+     (apply core/react-future [action handler])))
+
+(defn react-recur
+  "Recurs in react-loop"
+  ([vals]
+     (apply core/react-recur [vals])))
+
+;(defmacro react-loop
+;  "An infinite execution loop for an evented actor"
+;  ([& body]
+;     `(let [c# (fn []
+;                ~@body)]
+;        (with-meta {:loop c#} {:evented true}))))

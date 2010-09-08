@@ -16,12 +16,13 @@
   ([]
      (let [name "test evented"]
        (react-loop
-        (react
-         (fn [msg]
-           (cond-match
-            [#"exit" msg]       false
-            [#"exception" msg]  (throw (Exception. "Ping actor received exception"))
-            [[?from ?data] msg] (send! from (str "actor " name " says " data)))))))))
+        0 (fn [_]
+              (react
+               (fn [msg]
+                 (cond-match
+                  [#"exit" msg]       false
+                  [#"exception" msg]  (throw (Exception. "Ping actor received exception"))
+                  [[?from ?data] msg] (send! from (str "actor " name " says " data))))))))))
 
 ;; benchmark actors
 

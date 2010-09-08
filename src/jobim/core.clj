@@ -2,7 +2,8 @@
   (:require [jobim.rabbit :as rabbit]
             [org.zeromq.clojure :as zmq]
             [jobim.zookeeper :as zk]
-            [jobim.utils])
+            [jobim.utils]
+            [jobim.events :as jevts])
   (:use [jobim.utils]
         [clojure.contrib.logging :only [log]]
         [clojure.contrib.json]))
@@ -335,58 +336,14 @@
                                     :from (:from msg)
                                     :cause (:cause (:content msg))}))))))
 
-(declare pid-to-process-number)
-(declare clean-process)
-(declare notify-links)
-(defn reduce-evented-proces
-  ([msg]
-     (let [pid (:to msg)
-           content (:content msg)]
-       (try
-        (binding [*pid* pid
-                  *mbox* (pid-to-mbox pid)]
-          (let [evented-actor (get @*evented-table* (pid-to-process-number pid))
-                r-loop (:loop evented-actor)
-                cont (:continuation evented-actor)
-                next-desc (apply cont [content])]
-            ;; react -> evented
-            (if (:evented (meta next-desc))
-              ;; react -> loop
-              (if (:loop next-desc)
-                ;; exception!
-                ;; @todo This should be supported
-                (throw (Exception. "unsupported nested loop"))
-                ;; react -> react : queue
-                (dosync (alter *evented-table* (fn [table] (assoc table (pid-to-process-number pid) {:continuation (:react next-desc) :loop r-loop})))))
-              ;; react -> not evented
-              (if (nil? r-loop)
-                ;; no loop finished
-                (clean-process pid)
-                ;; we hve a loop -> recur
-                (let [next-desc (apply r-loop [])]
-                  ;; react -> loop -> evented?
-                  (if (:evented (meta next-desc))
-                    ;; react -> loop -> evented
-                    (if (:loop next-desc)
-                      ;; react -> loop -> loop : exception !
-                      (throw (Exception. "unsupported nested loop"))
-                      ;; react -> loop -> react : enqueue
-                      (dosync (alter *evented-table* (fn [table] (assoc table (pid-to-process-number pid) {:continuation (:react next-desc) :loop r-loop})))))
-                    ;; react -> loop -> not evented : finished
-                    (clean-process pid)))))))
-        (catch Exception ex
-          (log :error (str "*** process " pid " died with message : " (.getMessage ex) " " (vec (.getStackTrace ex))))
-          (notify-links pid (str (class ex) ":" (.getMessage ex)))
-          (remove-links pid)
-          (clean-process pid))))))
-
 (declare evented-process?)
+(declare send-to-evented)
 (defn dispatch-msg
   ([msg]
      (condp = (keyword (:topic msg))
        :process (if-let [mbox (pid-to-mbox (:to msg))]
                   (if (evented-process? (:to msg))
-                    (future (reduce-evented-proces msg))
+                    (send-to-evented (:to msg) msg)
                     (.put mbox (:content msg))))
        :link-new (future (handle-link-request msg))
        :rpc     (future (process-rpc msg))
@@ -419,6 +376,16 @@
      (let [config (eval (read-string (slurp file-path)))]
        (bootstrap-node (:node-name config) (:messaging-type config) (:messaging-options config) (:zookeeper-options config)))))
 
+(defn print-node-info
+  "Prints the configuration information for a node"
+  ([name id messaging-type messaging-args zookeeper-args]
+     (println (str "\n ** Jobim node started ** \n\n"
+                   "\n - node-name: " name
+                   "\n - id: " id
+                   "\n - messaging-type " messaging-type
+                   "\n - messaging-args " messaging-args
+                   "\n - zookeeper-args " zookeeper-args "\n\n"))))
+
 (declare purge-links)
 (declare resolve-node-name)
 (declare nodes)
@@ -426,14 +393,13 @@
   "Adds a new node to the distributed application"
   ([file-path] (bootstrap-from-file file-path))
   ([name messaging-type messaging-args zookeeper-args]
-     (println (str "\n ** Jobim node started ** \n\n"
-                   "\n - node-name: " name
-                   "\n - messaging-type " messaging-type
-                   "\n - messaging-args " messaging-args
-                   "\n - zookeeper-args " zookeeper-args "\n\n"))
      (let [id (random-uuid)]
+       ;; Print node information
+       (print-node-info name id messaging-type messaging-args zookeeper-args)
        ;; store node configuration
        (dosync (alter *node-id* (fn [_] id)))
+       ;; Launch evented processing of events
+       (jevts/run-multiplexer 1)
        ;; connecting to ZooKeeper
        (apply zk/connect zookeeper-args)
        ;; initializing the messaging service
@@ -627,7 +593,7 @@
                   (= :signal (keyword (:type msg))))
            (dispatch-signal msg)
            (if (evented-process? pid)
-             (do (future (reduce-evented-proces (protocol-process-msg (self) pid msg)))
+             (do (send-to-evented pid (protocol-process-msg (self) pid msg))
                  :ok)
              (let [mbox (pid-to-mbox pid)]
                (.put mbox msg)
@@ -704,42 +670,100 @@
            (add-link tx-name (self) pid)
            (throw (Exception. (str "Error linking processes " (self) " - " pid))))))))
 
+(def *react-loop-id* nil)
+
+(defn react-to-pid
+  ([evt-key] (aget (.split evt-key ":") 0)))
+
 (defn react
-  ([f]
-     (with-meta {:react f} {:evented true})))
+ ([f] (do (jevts/listen (str (self) ":message")
+                     (fn [data]
+                       (let [pid (react-to-pid (:key data))
+                             mbox (pid-to-mbox pid)]
+                         (jevts/unlisten (:key data) (:handler data))
+                         (binding [*pid* pid
+                                   *mbox* mbox]
+                           (let [result (f (.take mbox))]
+                             (when (not= result :evented-loop-continue)
+                               (try (clean-process pid)
+                                    (catch Exception ex
+                                      (log :error (str "Error cleaning evented process "
+                                                       pid " : " (.getMessage ex) " "
+                                                       (vec (.getStackTrace ex))))))))))))
+          :evented-loop-continue)))
+
+(defn react-loop
+  ([vals f]
+     (let [react-loop-id (str (self) ":react-loop-" (random-uuid))]
+       (jevts/listen react-loop-id
+                     (fn [data] (let [pid (react-to-pid (:key data))
+                                      old-map (get @*evented-table* (pid-to-process-number pid))
+                                      mbox (:mbox old-map)
+                                      env (:env old-map)
+                                      envp (assoc env :loop react-loop-id)
+                                      _ (dosync (alter *evented-table*
+                                                       (fn [table] (assoc table (pid-to-process-number pid)
+                                                                          (assoc old-map :env envp)))) )]
+                                  (binding [*pid* pid
+                                            *mbox* mbox]
+                                    (let [result (f (:data data))]
+                                      (when (not= result :evented-loop-continue)
+                                        (try (clean-process pid)
+                                             (catch Exception ex
+                                               (log :error (str "Error cleaning evented process "
+                                                                pid " : " (.getMessage ex) " "
+                                                                (vec (.getStackTrace ex))))))))))))
+       (apply jevts/publish [react-loop-id vals]))))
+
+(defn react-future
+  ([action handler]
+     (let [future-msg (str *pid* ":future:" (random-uuid))]
+       (jevts/listen future-msg
+                     (fn [data]
+                       (let [pid (react-to-pid (:key data))
+                             mbox (pid-to-mbox pid)]
+                         (jevts/unlisten (:key data) (:handler data))
+                         (binding [*pid* pid
+                                   *mbox* mbox]
+                           (let [result (handler (:data data))]
+                             (when (not= result :evented-loop-continue)
+                               (try (clean-process pid)
+                                    (catch Exception ex
+                                      (log :error (str "Error cleaning evented process "
+                                                       pid " : " (.getMessage ex) " "
+                                                       (vec (.getStackTrace ex))))))))))))
+       (future (let [result (try  (apply action [])
+                                  (catch Exception ex ex))]
+                 (apply jevts/publish [future-msg result])))
+       :evented-loop-continue)))
+
+(defn react-recur
+  ([vals] (let [old-map (get @*evented-table* (pid-to-process-number *pid*))
+                env (:env old-map)
+                loop (:loop env)]
+            (apply jevts/publish [loop vals])
+            :evented-loop-continue)))
+
+(defn send-to-evented
+  ([pid msg]
+     (let [mbox (pid-to-mbox pid)]
+       (.put mbox (:content msg))
+       (apply jevts/publish [(str pid ":message") (:content msg)]))))
 
 (defn spawn-evented
-  ([f]
-     (let [pid (spawn)
+  ([actor-desc]
+     (try
+      (let [actor-desc (if (string? actor-desc) (eval-fn actor-desc) actor-desc)
+            pid (spawn)
            mbox (pid-to-mbox pid)]
-       (try
-        (let [desc (if (string? f) (apply (eval-fn f) [])
-                       (if (:evented (meta f))
-                         f
-                         (apply f [])))]
-          (if (nil? (:evented (meta desc)))
-            ;; we run the function and it returns something that is not evented
-            ;; we rturn :finished since execution has finished
-            (do
-              (clean-process pid)
-              :finished)
-            ;; we have some evented functionality, it can be a loop or a react call
-            (let [r-loop (:loop desc)] ;; we check if we need to store the loop function
-              ;; If this is a loop we run the loop
-              (loop [c (if (:loop desc) (apply (:loop desc) []) desc)]
-                (if (:evented (meta c))
-                  (if (:loop c)
-                    ;; infinite loop
-                    (do (clean-process pid)
-                        (throw (Exception. "Unsupported nested loop")))
-                    ;; we have a queued event
-                    (dosync (alter *evented-table* (fn [table] (assoc table (pid-to-process-number pid) {:continuation (:react c) :loop r-loop})))
-                            pid))
-                  ;; execution has finished
-                  (do
-                    (clean-process pid)
-                    :finished))))))
-        (catch Exception ex
-          (log :error (str "*** Exception executing evented actor " pid " : " (.getMessage ex)))
-          (.printStackTrace ex)
-          :exception)))))
+       (dosync (alter *evented-table*
+                      (fn [table] (assoc table
+                                    (pid-to-process-number pid)
+                                    {:pid pid :mbox mbox :env {:loop nil}}))))
+       (binding [*pid* pid
+                 *mbox* mbox]
+         (apply actor-desc []))
+       pid)
+     (catch Exception ex
+       (log :error (str "Exception spawning evented " (.getMessage ex) " " (vec (.getStackTrace ex))))
+       (.exit System 1)))))
