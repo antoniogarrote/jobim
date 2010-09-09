@@ -504,7 +504,7 @@
          (let [version (:version (second (zk/get-data (str *node-names-znode* "/" registered))))]
            (zk/delete (str *node-names-znode* "/" registered) version)))
        (when (evented-process? pid)
-         (dosync (alter *process-table* (fn [table] (dissoc table (pid-to-process-number pid))))))
+         (dosync (alter *evented-table* (fn [table] (dissoc table (pid-to-process-number pid))))))
        (dosync (alter *process-table* (fn [table] (dissoc table (pid-to-process-number pid))))))))
 
 (declare send!)
@@ -755,15 +755,14 @@
      (try
       (let [actor-desc (if (string? actor-desc) (eval-fn actor-desc) actor-desc)
             pid (spawn)
-           mbox (pid-to-mbox pid)]
-       (dosync (alter *evented-table*
-                      (fn [table] (assoc table
-                                    (pid-to-process-number pid)
-                                    {:pid pid :mbox mbox :env {:loop nil}}))))
-       (binding [*pid* pid
-                 *mbox* mbox]
-         (apply actor-desc []))
-       pid)
-     (catch Exception ex
-       (log :error (str "Exception spawning evented " (.getMessage ex) " " (vec (.getStackTrace ex))))
-       (.exit System 1)))))
+            mbox (pid-to-mbox pid)]
+        (dosync (alter *evented-table*
+                       (fn [table] (assoc table
+                                     (pid-to-process-number pid)
+                                     {:pid pid :mbox mbox :env {:loop nil}}))))
+        (binding [*pid* pid
+                  *mbox* mbox]
+          (apply actor-desc []))
+        pid)
+      (catch Exception ex
+        (log :error (str "Exception spawning evented " (.getMessage ex) " " (vec (.getStackTrace ex))))))))

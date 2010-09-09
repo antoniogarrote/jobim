@@ -11,6 +11,9 @@
                  [org.clojars.mikejs/clojure-zmq "2.0.7-SNAPSHOT"]
                  [org.zmq/jzmq "2.0.6-SNAPSHOT"]
                  [org.apache.zookeeper/zookeeper "3.3.1"]]
-  :dev-dependencies [[leiningen/lein-swank "1.2.0-SNAPSHOT"]]
+  :dev-dependencies [[leiningen/lein-swank "1.2.0-SNAPSHOT"]
+                     [native-deps "1.0.3"]]
+  :native-dependencies [[org.clojars.mikejs/jzmq-native-deps
+                         "2.0.7-SNAPSHOT"]]
   :native-path "/usr/local/lib"
   :aot :all)

@@ -93,10 +93,3 @@
   "Recurs in react-loop"
   ([vals]
      (apply core/react-recur [vals])))
-
-;(defmacro react-loop
-;  "An infinite execution loop for an evented actor"
-;  ([& body]
-;     `(let [c# (fn []
-;                ~@body)]
-;        (with-meta {:loop c#} {:evented true}))))
