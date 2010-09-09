@@ -15,14 +15,24 @@
 (defn ping-evented
   ([]
      (let [name "test evented"]
-       (react-loop
-        0 (fn [_]
-              (react
-               (fn [msg]
-                 (cond-match
-                  [#"exit" msg]       false
-                  [#"exception" msg]  (throw (Exception. "Ping actor received exception"))
-                  [[?from ?data] msg] (send! from (str "actor " name " says " data))))))))))
+       (react-loop []
+         (react [msg]
+             (cond-match
+                [#"exit" msg]       :exit
+                [#"exception" msg]  (throw (Exception. "Ping actor received exception"))
+                [[?from ?data] msg] (do (send! from (str "actor " name " says " data))
+                                        (react-recur))))))))
+
+(defn ping-evented-2
+  ([]
+     (let [name "test evented2"]
+       (react-loop [should-exit false]
+         (when (not should-exit)
+           (react [msg]
+                  (cond-match
+                   [#"exit" msg]       (react-recur true)
+                   [[?from ?data] msg] (do (send! from (str "actor " name " says " data))
+                                           (react-recur false)))))))))
 
 ;; benchmark actors
 

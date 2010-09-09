@@ -90,3 +90,16 @@
         pid (spawn (fn [] (let [m (receive)] (deliver prom m))))]
     (send! evt [pid "hey"])
     (is (= "actor test evented says hey" @prom))))
+
+(deftest test-evented-actor2
+  (println "*** test-evented-actor2")
+  (let [prom (promise)
+        evt (spawn-evented "jobim.examples.actors/ping-evented-2")
+        pid (spawn (fn [] (let [m (receive)] (deliver prom m))))]
+    (send! evt [pid "hey"])
+    (is (= "actor test evented2 says hey" @prom))
+    (let [before (count (keys (deref jobim.core/*evented-table*)))]
+      (send! evt "exit")
+      (Thread/sleep 5000)
+      (is (= (dec before)
+             (count (keys (deref jobim.core/*evented-table*))))))))

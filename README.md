@@ -247,13 +247,14 @@ This is an example of the evented actor equivalent to the previously shown echo 
     (defn ping-evented
       ([]
          (let [name "test evented"]
-           (react-loop
-            (react
-             (fn [msg]
+           (react-loop [c 0]
+             (react [msg]
                (cond-match
-                [#"exit" msg]       false
-                [#"exception" msg]  (throw (Exception. "Ping actor received exception"))
-                [[?from ?data] msg] (send! from (str "actor " name " says " data)))))))))
+                 [#"exit" msg]       false
+                 [#"exception" msg]  (throw (Exception. "Ping actor received exception"))
+                 [[?from ?data] msg] (do
+                                       (send! from (str "actor " name " says "data " " c))
+                                       (recur (inc c))))))))))
 
 
 

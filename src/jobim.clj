@@ -74,15 +74,19 @@
   ([pid]
      (apply core/link [pid])))
 
-(defn react
+(defmacro react
   "Receives a message in an evented actor"
-  ([f]
-     (apply core/react [f])))
+  ([vals-bindings & body]
+     `(apply core/react [(fn [~@vals-bindings] ~@body)])))
 
-(defn react-loop
+(defmacro react-loop
   "Creates an evented loop in an actor description"
-  ([initial-vals f]
-     (apply core/react-loop [initial-vals f])))
+  ([vals-vars & body]
+    (let [vars-b (map #(nth vals-vars %1) (filter odd? (range 0 (count vals-vars))))
+          vals-b (map #(nth vals-vars %1) (filter even? (range 0 (count vals-vars))))]
+      (if (empty? vars-b)
+        `(core/react-loop [:not-argument-react-loop] (fn [_#] (do ~@body)))
+        `(core/react-loop [~@vars-b] (fn [~@vals-b] (do ~@body)))))))
 
 (defn react-future
   "Handles some blocking operation in an evented actor"
@@ -91,5 +95,6 @@
 
 (defn react-recur
   "Recurs in react-loop"
+  ([] (apply core/react-recur [:not-argument-react-loop]))
   ([vals]
      (apply core/react-recur [vals])))

@@ -706,7 +706,7 @@
                                                                           (assoc old-map :env envp)))) )]
                                   (binding [*pid* pid
                                             *mbox* mbox]
-                                    (let [result (f (:data data))]
+                                    (let [result (apply f (:data data))]
                                       (when (not= result :evented-loop-continue)
                                         (try (clean-process pid)
                                              (catch Exception ex
@@ -738,7 +738,7 @@
        :evented-loop-continue)))
 
 (defn react-recur
-  ([vals] (let [old-map (get @*evented-table* (pid-to-process-number *pid*))
+  ([& vals] (let [old-map (get @*evented-table* (pid-to-process-number *pid*))
                 env (:env old-map)
                 loop (:loop env)]
             (apply jevts/publish [loop vals])
