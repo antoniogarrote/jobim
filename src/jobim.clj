@@ -96,5 +96,5 @@
 (defn react-recur
   "Recurs in react-loop"
   ([] (apply core/react-recur [:not-argument-react-loop]))
-  ([vals]
-     (apply core/react-recur [vals])))
+  ([& vals]
+     (apply core/react-recur vals)))

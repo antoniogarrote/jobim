@@ -1,6 +1,8 @@
 (ns jobim.test.jobim
   (:use [jobim] :reload)
   (:use [jobim.examples.actors] :reload)
+  (:use [jobim.examples.fsm] :reload)
+  (:use [jobim.behaviours.fsm] :reload)
   (:use [clojure.test]))
 
 
@@ -103,3 +105,13 @@
       (Thread/sleep 5000)
       (is (= (dec before)
              (count (keys (deref jobim.core/*evented-table*))))))))
+
+(deftest test-fsm-1
+  (println "*** test-fsm-1")
+  (let [fsm (make-lock [1 2])]
+    (is (= :locked (state fsm)))
+    (push-button fsm 1)
+    (push-button fsm 2)
+    (is (= :open (state fsm)))
+    (lock fsm)
+    (is (= :locked (state fsm)))))

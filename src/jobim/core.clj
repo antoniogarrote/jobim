@@ -2,7 +2,6 @@
   (:require [jobim.rabbit :as rabbit]
             [org.zeromq.clojure :as zmq]
             [jobim.zookeeper :as zk]
-            [jobim.utils]
             [jobim.events :as jevts])
   (:use [jobim.utils]
         [clojure.contrib.logging :only [log]]
@@ -225,8 +224,8 @@
 
 (defn java-decode
   ([bytes] (let [bis (java.io.ByteArrayInputStream. (if (string? bytes) (.getBytes bytes) bytes))
-                  ois (java.io.ObjectInputStream. bis)
-                  obj (.readObject ois)]
+                 ois (java.io.ObjectInputStream. bis)
+                 obj (.readObject ois)]
               (.close ois)
               obj)))
 
@@ -301,7 +300,7 @@
            should-return (get content :should-return)
            internal-id (get content :internal-id)]
        (try
-        (let [f (eval-fn function)
+        (let [f (eval-ns-fn function)
               result (apply f args)]
           (when should-return
             (let [node (pid-to-node-id from)
@@ -557,7 +556,7 @@
   ([f]
      (let [pid (spawn)
            mbox (pid-to-mbox pid)
-           f (if (string? f) (eval-fn f) f)]
+           f (if (string? f) (eval-ns-fn f) f)]
        (future
         (binding [*pid* pid
                   *mbox* mbox]
@@ -753,7 +752,7 @@
 (defn spawn-evented
   ([actor-desc]
      (try
-      (let [actor-desc (if (string? actor-desc) (eval-fn actor-desc) actor-desc)
+      (let [actor-desc (if (string? actor-desc) (eval-ns-fn actor-desc) actor-desc)
             pid (spawn)
             mbox (pid-to-mbox pid)]
         (dosync (alter *evented-table*

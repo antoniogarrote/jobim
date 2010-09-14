@@ -39,7 +39,10 @@
   ([ns-fn]
      (if (= -1 (.indexOf ns-fn "/"))
        (eval (read-string ns-fn))
-       (let [ns-part (first (vec (.split ns-fn "/")))]
+       (let [parts (vec (.split ns-fn "/"))
+             ns-part (first parts)
+             fn-part (second parts)]
+;         (eval (read-string (str "(use ['" ns-part " :only '(" fn-part ")])")))))))
          (eval (read-string (str "(do (use '" ns-part ")" ns-fn ")")))))))
 
 (defn eval-fn
