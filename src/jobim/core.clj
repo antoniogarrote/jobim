@@ -143,7 +143,7 @@
            socket (zmq/make-socket ctx zmq/+upstream+)
            downstream-socket (zmq/make-socket ctx zmq/+downstream+)
            _ (zmq/connect downstream-socket (:protocol-and-port configuration))
-           ms (jobim.core.ZeroMQService. {:context ctx :socket socket :node-map (ref {@*node-id* downstream-socket})
+           ms (jobim.core.ZeroMQService. {:context ctx :socket socket :node-map (ref {@*node-id* (agent downstream-socket)})
                                           :io-threads (or (:io-threads configuration) *zmq-default-io-threads*)})]
        (zmq/bind socket (:protocol-and-port configuration))
        (alter-var-root #'*messaging-service* (fn [_] ms))
