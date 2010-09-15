@@ -51,3 +51,9 @@
 
 (defn random-uuid
   ([] (.replace (str (java.util.UUID/randomUUID)) "-" "")))
+
+(defn eval-class
+  ([class-or-string]
+     (if (string? class-or-string)
+       (eval (read-string (str "(" class-or-string ".)")))
+       class-or-string)))

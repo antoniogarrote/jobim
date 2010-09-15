@@ -1,5 +1,6 @@
 (ns jobim.behaviours.fsm
   (:use [jobim]
+        [jobim.utils]
         [matchure]))
 
 
@@ -72,7 +73,8 @@
 (defn start
   "Starts a new FSM behaviour"
   ([fsm initial-msg]
-     (let [[initial-state-name initial-state-data] (init fsm initial-msg)
+     (let [fsm (eval-class fsm)
+           [initial-state-name initial-state-data] (init fsm initial-msg)
              pid (spawn #(fsm-actor initial-state-name initial-state-data fsm))]
        pid))
   ([name fsm initial-msg]
@@ -83,7 +85,8 @@
 (defn start-evented
   "Starts a new evented FSM behaviour"
   ([fsm initial-msg]
-     (let [[initial-state-name initial-state-data] (init fsm initial-msg)
+     (let [fsm (eval-class fsm)
+           [initial-state-name initial-state-data] (init fsm initial-msg)
            pid (spawn-evented #(fsm-evented-actor initial-state-name initial-state-data fsm))]
        pid))
   ([name fsm initial-msg]
