@@ -60,6 +60,7 @@
   (set-messages-queue [this queue]
                       "Accepts an instance of a Queue where incoming messages will be stored"))
 
+
 ;; RabbitMQ implementation of the messaging service
 (deftype RabbitMQService [*rabbit-server*] MessagingService
 
@@ -128,7 +129,7 @@
          (alter-var-root #'*messaging-service* (fn [_] ms))
          ms))))
 
-(defonce *zmq-default-io-threads* 10)
+(defonce *zmq-default-io-threads* (num-processors))
 
 (defmethod make-messaging-service :zeromq
   ([kind configuration]

@@ -57,3 +57,6 @@
      (if (string? class-or-string)
        (eval (read-string (str "(" class-or-string ".)")))
        class-or-string)))
+
+(defn num-processors
+  ([] (.. (Runtime/getRuntime) availableProcessors)))
