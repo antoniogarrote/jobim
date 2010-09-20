@@ -69,7 +69,7 @@
   (set-controlling-actor [this pid] (swap! state (fn [old-state] (assoc old-state :pid pid))))
   (receive-tcp [this] (if (:active @state)
                         (throw (Exception. "The TCP actor is configured into active mode, no passive receive can be invoked"))
-                        (.get (:queue @state)))))
+                        (.take (:queue @state)))))
 
 ;; TCP Client impl.
 
@@ -97,12 +97,12 @@
   (set-controlling-actor [this pid] (swap! state (fn [old-state] (assoc old-state :pid pid))))
   (receive-tcp [this] (if (:active @state)
                         (throw (Exception. "The TCP actor is configured into active mode, no passive receive can be invoked"))
-                        (.get (:queue @state)))))
+                        (.take (:queue @state)))))
 
 
 (defn send-tcp!
   ([dst data]
-     (if (and (map? dst) (= (:topic dst) ))
+     (if (and (map? dst) (= (:topic dst) :tcp-data))
        (send-tcp-inner! (:dst dst) (:counter dst) data)
        (send-tcp-inner! dst 0 data))))
 

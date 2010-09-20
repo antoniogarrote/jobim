@@ -1,5 +1,8 @@
 (ns jobim.examples.tcp
-  (:use [jobim.behaviours.tcp]))
+  (:use [jobim]
+        [jobim.behaviours.tcp]
+        [clojure.contrib.logging :only [log]]
+        [matchure]))
 
 (defn server-actor
   ([]
