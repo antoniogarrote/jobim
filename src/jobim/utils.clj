@@ -54,9 +54,17 @@
 
 (defn eval-class
   ([class-or-string]
-     (if (string? class-or-string)
-       (eval (read-string (str "(" class-or-string ".)")))
-       class-or-string)))
+     (let [cls (if (string? class-or-string) (Class/forName class-or-string) class-or-string)]
+       (.newInstance (aget (.getConstructors cls) 0) (make-array java.lang.Object 0)))))
+;     (if (string? class-or-string)
+;       (eval (read-string (str "(" class-or-string ".)")))
+;       class-or-string)))
+
+(defmacro instantiate
+  ([class]
+     `(new ~class))
+  ([class & args]
+     `(new ~class ~@args)))
 
 (defn num-processors
   ([] (.. (Runtime/getRuntime) availableProcessors)))
