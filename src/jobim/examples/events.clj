@@ -13,9 +13,17 @@
   ([] (start-event-manager "example-manager")))
 
 (defn add-example-handler
-  ([name] (add-handler (resolve-name name)
-             [:console jobim.examples.events.ConsoleLogger]
+  ([name] (add-handler (resolve-name "example-manager")
+             [name jobim.examples.events.ConsoleLogger]
              "got a message! :")))
 
 
-;(notify (resolve-name "example-manager") "hey!")
+;; Example code
+
+; (start-example-event-manager)
+; (add-example-handler :console)
+; (add-example-handler :console2)
+; (notify (resolve-name "example-manager") "hey!")
+; (delete-handler (resolve-name "example-manager") [:console2 ConsoleLogger])
+; (notify (resolve-name "example-manager") "hey!")
+; (delete-handler (resolve-name "example-manager") ConsoleLogger)
