@@ -8,7 +8,7 @@
 (defn reset-multiplexer
   ([] (do
         (alter-var-root #'jobim.events/*events-handlers* (fn [_] (ref {})))
-        (alter-var-root #'jobim.events/*events-queue* (fn [_] (java.util.concurrent.LinkedBlockingQueue.))))))
+        (alter-var-root #'jobim.events/*events-queue* (fn [_] (atom []))))))
 
 
 (deftest test-register-handle-send-event-1
@@ -24,7 +24,6 @@
    (listen "test" handler)
    (listen "test2" handler)
    (Thread/sleep 1000)
-
    (publish "test" 1)
 
    (Thread/sleep 1000)

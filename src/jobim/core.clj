@@ -676,11 +676,10 @@
   ([evt-key] (aget (.split evt-key ":") 0)))
 
 (defn react
- ([f] (do (jevts/listen (str (self) ":message")
+ ([f] (do (jevts/listen-once (str (self) ":message")
                      (fn [data]
                        (let [pid (react-to-pid (:key data))
                              mbox (pid-to-mbox pid)]
-                         (jevts/unlisten (:key data) (:handler data))
                          (binding [*pid* pid
                                    *mbox* mbox]
                            (let [result (f (.take mbox))]
@@ -718,11 +717,10 @@
 (defn react-future
   ([action handler]
      (let [future-msg (str *pid* ":future:" (random-uuid))]
-       (jevts/listen future-msg
+       (jevts/listen-once future-msg
                      (fn [data]
                        (let [pid (react-to-pid (:key data))
                              mbox (pid-to-mbox pid)]
-                         (jevts/unlisten (:key data) (:handler data))
                          (binding [*pid* pid
                                    *mbox* mbox]
                            (let [result (handler (:data data))]

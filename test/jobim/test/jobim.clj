@@ -3,7 +3,8 @@
   (:use [jobim.examples.actors] :reload)
   (:use [jobim.examples.fsm] :reload)
   (:use [jobim.behaviours.fsm] :reload)
-  (:use [clojure.test]))
+  (:use [clojure.test])
+  (:require [jobim.examples.server :as jserver]))
 
 
 (defonce *messaging-to-test* :rabbitmq)
@@ -115,3 +116,19 @@
     (is (= :open (state fsm)))
     (lock fsm)
     (is (= :locked (state fsm)))))
+
+(deftest test-server-1
+  (println "*** test-server1")
+  (let [server (jserver/make-channel-manager)
+        chn (jserver/alloc server)]
+    (is (not (nil? chn)))
+    (jserver/free server chn)
+    (is (= chn (jserver/alloc server)))))
+
+(deftest test-server-2
+  (println "*** test-server2")
+  (let [server (jserver/make-channel-manager-evented)
+        chn (jserver/alloc server)]
+    (is (not (nil? chn)))
+    (jserver/free server chn)
+    (is (= chn (jserver/alloc server)))))
