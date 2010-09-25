@@ -1,5 +1,5 @@
-(defproject jobim "0.0.6-SNAPSHOT"
-  :description "Actors library for Clojure built on top of Zookeeper and RabbitMQ"
+(defproject jobim "0.0.7-SNAPSHOT"
+  :description "Actors library for Clojure"
   :dependencies [[org.clojure/clojure "1.2.0"]
                  [org.clojure/clojure-contrib "1.2.0"]
                  [log4j "1.2.15" :exclusions [javax.mail/mail

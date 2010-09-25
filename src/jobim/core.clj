@@ -26,6 +26,7 @@
 (def *rpc-count* (ref 0))
 (def *links-table* (ref {}))
 (def *node-id* (ref nil))
+(def *local-name-register* (ref {}))
 
 ;; Messaging layer
 
@@ -496,13 +497,18 @@
        (get dictionary key))))
 
 (defn clean-process
+  "Clean all data associated to this process locally or remotely"
   ([pid]
      (let [version (:version (second (zk/get-data (zk-process-path pid))))
-           registered (dictionary-get pid :registered-name)]
+           registered (dictionary-get pid :registered-name)
+           registered-local (dictionary-get pid :registered-name-local)]
        (zk/delete (zk-process-path pid) version)
        (when (not (nil? registered))
          (let [version (:version (second (zk/get-data (str *node-names-znode* "/" registered))))]
            (zk/delete (str *node-names-znode* "/" registered) version)))
+       (when (not (nil? registered-local))
+         (dosync (alter *local-name-register*
+                        (fn [table] (dissoc table registered-local)))))
        (when (evented-process? pid)
          (dosync (alter *evented-table* (fn [table] (dissoc table (pid-to-process-number pid))))))
        (dosync (alter *process-table* (fn [table] (dissoc table (pid-to-process-number pid))))))))
@@ -605,14 +611,32 @@
   ([] (let [msg (.take *mbox*)]
         msg)))
 
-(defn register-name
-  "Associates a name that can be retrieved from any node to a PID"
+(defn- register-name-global
+  "Associates a name that can be retrieved from any node and transformed into a PID"
   [name pid]
   (if (zk/exists? (str *node-names-znode* "/" name))
     (throw (Exception. (str "Already existent remote process " pid)))
     (do (zk/create (str *node-names-znode* "/" name) pid {:world [:all]} :ephemeral)
         (dictionary-write pid :registered-name name)
         :ok)))
+
+(defn- register-name-local
+  "Associates a name that can be translated locally to a PID"
+  [name pid]
+  (do
+    (dosync (if (get @*local-name-register* name)
+              (throw (Exception. (str "Already existent local process " (get @*local-name-register* name))))
+              (alter @*local-name-register* (fn [table] (assoc table name pid)))))
+    (dictionary-write pid :registered-name-local name))
+  :ok)
+
+(defn register-name
+  "Associates a name that can be translated locally or globally into a PID"
+  ([name-or-map pid]
+     (let [name (if (string? name-or-map) {:global name-or-map} name-or-map)]
+       (if (:global name)
+         (register-name-global (:global name) pid)
+         (register-name-local (:local name) pid)))))
 
 (defn registered-names
   "The list of globally registered names"
@@ -623,11 +647,24 @@
                {}
                children))))
 
-(defn resolve-name
+(defn resolve-name-global
   "Wraps a globally registered name"
   ([name]
      (if (zk/exists? (str *node-names-znode* "/" name))
        (String. (first (zk/get-data (str *node-names-znode* "/" name)))))))
+
+(defn resolve-name-local
+  "Wraps a locally registered name"
+  ([name]
+     (get @*local-name-register* name)))
+
+(defn resolve-name
+  "Wraps a name locally or globally"
+  ([name-or-map]
+     (let [name (if (string? name-or-map) {:global name-or-map} name-or-map)]
+       (if (:global name)
+         (resolve-name-global (:global name))
+         (resolve-name-local (:local name))))))
 
 (defn resolve-node-name
   "Returns the identifier for a provided node name"

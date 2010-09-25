@@ -2,7 +2,7 @@
   (:use [clojure.contrib.logging :only [log]]))
 
 ;; Global registry of events and events handlers
-(def *events-handlers* (ref {}))
+(def *events-handlers* (atom {}))
 
 ;; Notification queues
 (def *notification-queues* (ref [[] []]))
@@ -20,7 +20,7 @@
   ([f]
      (do
        (.lock *events-queue-lock*)
-         (try (f *events-queue*)
+         (try (f)
               (finally
                (.unlock *events-queue-lock*))))))
 
@@ -51,7 +51,7 @@
   ([events-handlers key]
      (let [handlers (get @*events-handlers* key)
            handlers-p (filter (fn [h]  (not (:once (meta h)))) handlers)]
-       (dosync (alter *events-handlers* (fn [ehs] (assoc ehs key handlers-p)))))))
+       (swap! *events-handlers* (fn [ehs] (assoc ehs key handlers-p))))))
 
 (defn- match-handlers
   ([evt]
@@ -63,12 +63,12 @@
 
 
 (defn- find-event-queue
-  ([queue]
-     (let [result (find-event-queue @queue [])]
+  ([]
+     (let [result (find-event-queue @*events-queue* [])]
        (if (nil? result)
          nil
          (let [[to-return queue-p] result]
-           (swap! queue (fn [old] queue-p))
+           (swap! *events-queue* (fn [old] (vec queue-p)))
            to-return))))
   ([remaining acum]
      (if (empty? remaining) nil
@@ -120,33 +120,37 @@
   "Sends a new data to the events queue"
   ([key data]
      (with-queue-critical-section
-       (fn [q] (swap! q (fn [old-queue]
-                          (conj old-queue {:key key :data data})))))
+       (fn [] (swap! *events-queue* (fn [old-queue]
+                                      (vec (conj old-queue {:key key :data data}))))))
      (.put *main-notification-queue* :published)))
 
 (defn listen
   "Starts listening for events"
   ([key handler]
      (if (get @*events-handlers* key)
-       (dosync (alter *events-handlers* (fn [table] (assoc table key
-                                                           (conj (get table key) handler)))))
-       (dosync (alter *events-handlers* (fn [table] (assoc table key [handler])))))
+       (with-queue-critical-section #(swap! *events-handlers*
+                                            (fn [table] (assoc table key
+                                                               (conj (get table key) handler)))))
+       (with-queue-critical-section #(swap! *events-handlers*
+                                            (fn [table] (assoc table key [handler])))))
      (.put *main-notification-queue* :listening)))
 
 (defn listen-once
   "Starts listening for a single event occurrence"
   ([key handler]
      (if (get @*events-handlers* key)
-       (dosync (alter *events-handlers* (fn [table] (assoc table key
-                                                           (conj (get table key) (with-meta handler {:once true}))))))
-       (dosync (alter *events-handlers* (fn [table] (assoc table key [(with-meta handler {:once true})])))))
+       (with-queue-critical-section #(swap! *events-handlers*
+                                            (fn [table] (assoc table key
+                                                               (conj (get table key) (with-meta handler {:once true}))))))
+       (with-queue-critical-section #(swap! *events-handlers*
+                                            (fn [table] (assoc table key [(with-meta handler {:once true})])))))
      (.put *main-notification-queue* :listening)))
 
 (defn unlisten
   "Stops listening for events"
   ([key handler]
      (when (get @*events-handlers* key)
-       (dosync (alter *events-handlers*
-                      (fn [table] (let [old-handlers (get table key)
-                                        new-handlers (filter #(not= %1 handler) old-handlers)]
-                                    (assoc table key new-handlers))))))))
+       (with-queue-critical-section (swap! *events-handlers*
+                                           (fn [table] (let [old-handlers (get table key)
+                                                             new-handlers (filter #(not= %1 handler) old-handlers)]
+                                                         (assoc table key new-handlers))))))))
