@@ -118,7 +118,9 @@
           [[:notify ?evt] msg]                                  (do (notify implementation evt)
                                                                     (recur (receive)))
 
-          [:stop msg]                                                (stop implementation)
+          [:stop msg]                                           (stop implementation)
+
+          [:terminate msg]                                      (stop implementation)
 
           [_ msg]                                               (recur (receive)))))))
 

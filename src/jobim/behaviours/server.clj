@@ -77,7 +77,7 @@
                      ;; Cast
                      [[:server-cast ?request] msg]         (do-server-cast server request state)
                      ;; Terminate
-                     [:terminate msg]                      (terminate server state)
+                     [:terminate msg]                      (do (terminate server state) :norecur)
                      ;; Info
                      [_ msg]                               (do-handle-info server msg state))]
          (when (not= result :norecur)
@@ -94,7 +94,7 @@
                        ;; Cast
                        [[:server-cast ?request] msg]         (do-server-cast server request state)
                        ;; Terminate
-                       [:terminate msg]                      (terminate server state)
+                       [:terminate msg]                      (do (terminate server state) :norecur)
                        ;; Info
                        [_ msg]                               (do-handle-info server msg state))]
            (when (not= result :norecur)

@@ -39,6 +39,8 @@
                                            :stop       (terminate fsm state-name state-data)
                                            (throw (Exception. (str "Unknown action returned from transition function: " action)))))
 
+        [:terminate msg]              (terminate fsm state-name state-data)
+
         [_ msg]                        (let [[action next-state-name next-state-data] (handle-info fsm state-name state-data msg)]
                                          (condp = action
                                            :next-state (recur (receive)

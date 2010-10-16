@@ -545,6 +545,20 @@
          (publish *messaging-service* msg))
        (throw (Exception. (str "Non existent remote process " pid))))))
 
+(defn process-info
+  "Returns information about the process identified by the provided PID"
+  ([pid]
+     (let [node (pid-to-node-id pid)]
+       (if (= node @*node-id*)
+         ;; The process is in this node
+         (let [id (pid-to-process-number pid)
+               info (get @*process-table* id)]
+           (if (nil? info) nil {:pid pid :node node :alive true}))
+         ;; The process is in a different node
+         (if (zk/exists? (zk-process-path pid))
+           {:pid pid :node node :alive true}
+           nil)))))
+
 (defn admin-send
   ([node pid msg]
      (if (zk/exists? (zk-process-path pid))

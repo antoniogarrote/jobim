@@ -257,7 +257,6 @@ This is an example of the evented actor equivalent to the previously shown echo 
                                        (recur (inc c))))))))))
 
 
-
 Tests
 -----
 

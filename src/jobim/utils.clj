@@ -70,3 +70,28 @@
 
 (defn num-processors
   ([] (.. (Runtime/getRuntime) availableProcessors)))
+
+(defn in?
+  "Checks if an element is included in a collection"
+  ([coll v] (not (nil? (some #(= v %) coll))))
+  ([coll pred v] (not (nil? (some #(pred v %) coll)))))
+
+; java.util.TimerTask
+
+(defn make-timer
+  ([] (java.util.Timer.)))
+
+(defn make-timer-task
+  ([f]
+     (proxy [java.util.TimerTask] []
+       (run [] (f)))))
+
+(defn with-timer
+  ([t period f]
+     (.schedule t (make-timer-task f) (long 0) (long period)) t)
+  ([period f]
+     (let [t (make-timer)]
+       (with-timer t period f))))
+
+(defn cancel-timer
+  ([t] (.cancel t)))

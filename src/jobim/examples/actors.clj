@@ -1,5 +1,6 @@
 (ns jobim.examples.actors
   (:use [jobim]
+        [clojure.contrib.logging :only [log]]
         [matchure]))
 
 (defn ping

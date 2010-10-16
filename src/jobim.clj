@@ -26,6 +26,11 @@
   "Creates a new process attached to the running shell"
   ([] (apply core/spawn-in-repl [])))
 
+(defn process-info
+  "Returns information about the process identified by the provided PID"
+  ([pid]
+     (apply core/process-info [pid])))
+
 (defn self
   "Returns the pid of the current process"
   ([] (apply core/self [])))
