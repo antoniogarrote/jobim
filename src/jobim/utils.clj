@@ -5,11 +5,13 @@
      (str (java.net.InetAddress/getLocalHost))))
 
 (defn show-java-methods
-  ([obj]
+  "Collections and optionally prints the methods defined in a Java object"
+  ([obj should-show?]
      (let [ms (.. obj getClass getDeclaredMethods)
            max (alength ms)]
-       (loop [count 0]
-         (when (< count max)
+       (loop [count 0
+              acum []]
+         (if (< count max)
            (let [m (aget ms count)
                  params (.getParameterTypes m)
                  params-max (alength params)
@@ -21,8 +23,17 @@
                                          (+ params-count 1))
                                   acum))
                               " ) : " return-type)]
-             (println (str to-show))
-             (recur (+ 1 count))))))))
+             (when should-show? (println (str to-show)))
+             (recur (+ 1 count)
+                    (conj acum (str to-show))))
+           acum))))
+  ([obj] (show-java-methods obj true)))
+
+(defn respond-to-java-method?
+  "Test if any method in an object matches the method definition passed as a parameter"
+  ([obj method]
+     (let [found (filter #(= (.indexOf % method) 0) (show-java-methods obj false))]
+       (not (empty? found)))))
 
 (defn collect-java-implemented-interfaces
   ([obj]
@@ -144,18 +155,22 @@ Returns true if promise has been delivered, else false"
   [p v] (.invoke p v))
 
 (defn apply-with-timeout
+  "Applies the function and arguments passed as parameters with a given timeout.
+   - If execution of function finishes before timeout the result is returned.
+   - If timeout happens before the function returns, :timeout is returned"
   ([f args timeout]
      (let [to-return (testable-promise)
-           timer (make-timer)]
-       (future (let [from-function (try {:success (apply f args)}
-                                        (catch Exception ex
-                                          {:exception ex}))]
-                 (when-not (testable-promise-delivered? to-return)
-                   (testable-promise-deliver to-return from-function))))
+           timer (make-timer)
+           fut (future (let [from-function (try {:success (apply f args)}
+                                                (catch Exception ex
+                                                  {:exception ex}))]
+                         (when-not (testable-promise-delivered? to-return)
+                           (testable-promise-deliver to-return from-function))))]
        (with-timer timer timeout
          #(do
             (when-not (testable-promise-delivered? to-return)
-              (testable-promise-deliver to-return :timeout))
+              (do (future-cancel fut)
+                  (testable-promise-deliver to-return :timeout)))
             (cancel-timer timer)))
        (let [result @to-return]
          (if (= :timeout result) :timeout
