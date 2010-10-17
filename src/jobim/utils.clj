@@ -95,11 +95,70 @@
        (run [] (f)))))
 
 (defn with-timer
-  ([t period f]
-     (.schedule t (make-timer-task f) (long 0) (long period)) t)
+  ([timer period f]
+     (.schedule timer (make-timer-task f) (long period) (long period)) timer)
   ([period f]
-     (let [t (make-timer)]
-       (with-timer t period f))))
+     (let [timer (make-timer)]
+       (with-timer timer period f))))
 
 (defn cancel-timer
   ([t] (.cancel t)))
+
+
+;; apply with timeout
+
+(defn testable-promise
+  "Alpha - subject to change.
+Returns a promise object that can be read with deref/@, and set
+once only, with deliver. Calls to deref/@ prior to delivery will
+block. All subsequent derefs will return the same delivered value
+without blocking."
+  {:added "1.1"}
+  []
+  (let [d (java.util.concurrent.CountDownLatch. 1)
+        v (atom nil)]
+    ^{:delivered?
+      (fn []
+        (locking d
+          (zero? (.getCount d))))}
+    (reify
+     clojure.lang.IDeref
+      (deref [_] (.await d) @v)
+     clojure.lang.IFn
+      (invoke [this x]
+        (locking d
+          (if (pos? (.getCount d))
+            (do (reset! v x)
+                (.countDown d)
+                this)
+            (throw (IllegalStateException. "Multiple deliver calls to a promise"))))))))
+
+(defn testable-promise-delivered?
+  "Alpha - subject to change.
+Returns true if promise has been delivered, else false"
+  [p]
+  (if-let [f (:delivered? (meta p))]
+    (f)))
+
+(defn testable-promise-deliver
+  [p v] (.invoke p v))
+
+(defn apply-with-timeout
+  ([f args timeout]
+     (let [to-return (testable-promise)
+           timer (make-timer)]
+       (future (let [from-function (try {:success (apply f args)}
+                                        (catch Exception ex
+                                          {:exception ex}))]
+                 (when-not (testable-promise-delivered? to-return)
+                   (testable-promise-deliver to-return from-function))))
+       (with-timer timer timeout
+         #(do
+            (when-not (testable-promise-delivered? to-return)
+              (testable-promise-deliver to-return :timeout))
+            (cancel-timer timer)))
+       (let [result @to-return]
+         (if (= :timeout result) :timeout
+             (if (nil? (:exception result))
+               (:success result)
+               (throw (:exception result))))))))
