@@ -112,7 +112,7 @@
        pid))
   ([name server initial-msg]
      (let [pid (start server initial-msg)]
-       (register-name name pid))))
+       (register-name name pid) pid)))
 
 
 (defn start-evented

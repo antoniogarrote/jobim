@@ -62,6 +62,14 @@
 ;       (eval (read-string (str "(" class-or-string ".)")))
 ;       class-or-string)))
 
+(defmacro require-apply
+  ([function-path args]
+     `(let [[namespace-symbol# function-symbol#] (vec (->> (.split ~function-path "/") vec (map symbol)))
+            alias# (gensym (str namespace-symbol#))
+            alias-path# (symbol (str alias# "/" function-symbol#))]
+        (do (require [namespace-symbol# :as alias#])
+            (eval (read-string (str "(apply " alias-path# " " ~args ")")))))))
+
 (defmacro instantiate
   ([class]
      `(new ~class))
