@@ -10,7 +10,7 @@
 
 (defonce *restart-strategies* [:one-for-one :one-for-all :rest-for-one])
 
-(defn check-supervisor-specification
+(defn- check-supervisor-specification
   ([specification]
      (letfn [(check-restart-strategy [s] (if (in? *restart-strategies* (:restart-strategy s)) true
                                              (throw (Exception. (str "Wrong supervisor specification, unknown :restart-strategy '" s "', '"
@@ -38,7 +38,7 @@
 ; timer          -> obj  -> timer scheduling limit-checker-thread
 ; restarts-count -> ref  -> count of restarts
 
-(defn start-and-link-child
+(defn- start-and-link-child
   "Starts and link to a child process"
   ([child-specification child-table]
      (let [id       (:id child-specification)
@@ -48,7 +48,7 @@
          (link pid)
          (swap! child-table #(assoc % pid id))))))
 
-(defn make-restart-limit-checker-thread
+(defn- make-restart-limit-checker-thread
   "Periodically observes the count of restarts and send a signal to
    the supervisor in case the max-limit is reached"
   ([supervisor-pid restarts-count timer max-restarts max-time]
@@ -58,12 +58,12 @@
                 (do (send! supervisor-pid :max-restarts-reached)
                     (cancel-timer timer)))))))
 
-(defn make-specifications-table
+(defn- make-specifications-table
   ([specifications]
      (atom (reduce (fn [m s] (assoc m (:id s) s)) specifications))))
 
 
-(defn make-child-pid-table
+(defn- make-child-pid-table
   ([child-table specifications]
      (doseq [s specifications]
        (start-and-link-child s child-table))
@@ -74,16 +74,16 @@
        (make-child-pid-table child-table specifications))))
 
 
-(defn remove-from-child-pid-table
+(defn- remove-from-child-pid-table
   ([child-table pid]
      (swap! child-table #(dissoc % pid))))
 
-(defn specification-for-pid
+(defn- specification-for-pid
   ([child-pids-table specifications-table pid]
      (let [id (get @child-pids-table pid)]
        (get @specifications-table id))))
 
-(defn terminate-children
+(defn- terminate-children
   "Sends terminate messages to all the processes and waits until all the
    processes have finished execution"
   ([pids]
@@ -99,17 +99,17 @@
                            (conj acum pid)))
                        [] pids)))))))
 
-(defn reset-child-table
+(defn- reset-child-table
   ([child-pid-table] (swap! child-pid-table (fn [_] {}))))
 
-(defn find-rest-pids
+(defn- find-rest-pids
   ([child-pids pid]
      (loop [to-check child-pids]
        (if (= pid (first to-check))
          (rest to-check)
          (recur (rest to-check))))))
 
-(defn apply-restart-strategy
+(defn- apply-restart-strategy
   ([from cause supervisor-specification child-pids-table child-specifications-table]
      (log :debug (str "*** supervisor " (self)  " : got exception from  " from ", cause: " cause))
      (let [pid-specification (specification-for-pid child-pids-table child-specifications-table from)
@@ -147,8 +147,9 @@
          ;; Handle the child messages / signals
          ;; with the right semantics
          (cond-match
-           [{:signal :link-broken, :from ?from, :cause ?cause} msg]
-             (apply-restart-strategy from cause supervisor-specification child-pids-table child-specifications-table)
+          [{:signal :link-broken, :from ?from, :cause ?cause} msg]
+             (do (dosync (alter restarts-count #(inc %)))
+                 (apply-restart-strategy from cause supervisor-specification child-pids-table child-specifications-table))
            [:max-restarts-reached msg]
              (do (println (str "MAX RESTARTS REACHED"))
                  (terminate-children (keys @child-pids-table))
@@ -172,25 +173,3 @@
   ([name supervisor-specification]
      (let [pid (start supervisor-specification)]
        (register-name name pid) pid)))
-
-
-;; test client server
-(require '[jobim.behaviours.server :as gen-server])
-
-(gen-server/def-server ExceptionTestServer
-  (init [this _] [])
-
-  (handle-call [this request from state]
-               (println (str "RECEIVED " request " STAYING ALIVE"))
-               (gen-server/reply :alive []))
-
-  (handle-cast [this request state] (if (= request :exception)
-                                      (throw (Exception. "ME MORI!"))
-                                      (gen-server/noreply state)))
-
-  (handle-info [this request state] (gen-server/noreply state))
-
-  (terminate [this state] (println (str "CALLING TO TERMINATE"))))
-
-(defn make-test-client
-  ([n] (gen-server/start (str "test-client-" n)  (ExceptionTestServer.) [])))
