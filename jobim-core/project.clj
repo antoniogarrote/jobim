@@ -9,6 +9,7 @@
                  [org.apache.zookeeper/zookeeper "3.3.3" :exclusions [log4j/log4j]]
                  [matchure "0.9.1"]
                  [aleph "0.1.5-SNAPSHOT"]]
+  :repositories {"apache" "https://repository.apache.org/content/groups/public"}
   :dev-dependencies [[leiningen/lein-swank "1.2.0-SNAPSHOT"]
                      [cdt "1.2"]]
   :aot :all)
