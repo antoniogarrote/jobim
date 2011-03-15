@@ -60,7 +60,7 @@
               (zk/join-group group-name group-id value))
   (watch-group [this group-name callback]
                (zk/watch-group group-name
-                               (fn [evt] (try (let [node (first (:member evt))
+                               (fn [evt] (try (let [node (first (:members evt))
                                                    kind (:kind evt)]
                                                (callback kind node))
                                              (catch Exception ex
@@ -71,10 +71,12 @@
                 (zk/get-children group-name))
 
   ;; 2-phase commit
-  (make-2-phase-commit [this tx-name participants])
+  (make-2-phase-commit [this tx-name participants]
+                       (zk/make-2-phase-commit tx-name participants))
   (commit [this tx-name participant]
           (zk/commit tx-name participant))
-  (rollback [this tx-name participant]))
+  (rollback [this tx-name participant]
+            (zk/rollback tx-name participant)))
 
 (defmethod make-coordination-service :zookeeper
   ([kind configuration]

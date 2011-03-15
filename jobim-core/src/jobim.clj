@@ -115,3 +115,13 @@
   ([] (apply core/react-recur [:not-argument-react-loop]))
   ([& vals]
      (apply core/react-recur vals)))
+
+(defn debug-node
+  ([file]
+     (use 'jobim)
+     (use 'jobim.services.coordination.zookeeper)
+     (use 'jobim.services.messaging.tcp)
+     (use 'jobim.services.serialization.java)
+
+     (bootstrap-node file)
+     (spawn-in-repl)))

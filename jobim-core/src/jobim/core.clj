@@ -294,10 +294,12 @@
        :link-new (future (handle-link-request msg))
        :rpc     (future (process-rpc msg))
        :rpc-response (future (try
-                              (let [prom (rpc-id-to-promise (:internal-id (:content msg)))
-                                    val (:value (:content msg))]
-                                (deliver prom val)
-                                (remove-rpc-promise (:internal-id (:content msg))))
+                               (let [prom (rpc-id-to-promise (:internal-id (:content msg)))
+                                     val (:value (:content msg))]
+                                 (when (not (nil? prom))
+                                   (do
+                                     (deliver prom val)
+                                     (remove-rpc-promise (:internal-id (:content msg))))))
                               (catch Exception ex (log :error (str "*** Error processing rpc-response: " (.getMessage ex)))))))))
 
 (defn node-dispatcher-thread
@@ -487,15 +489,14 @@
 (defn purge-links
   ([node]
      (try
-     (let [pids (keys @*links-table*)]
-       (doseq [pid pids]
-         (let [linked (get @*links-table* pid)
-               broken-links (filter #(= node (pid-to-node-id %1)) linked)]
-           (when (> (count broken-links) 0)
-             (doseq [broken-pid broken-links]
-               (send! pid (protocol-link-broken broken-pid pid "node down")))))))
-     (catch Exception ex
-       (log :error (str "*** Exception " (.getMessage ex)))))))
+       (let [pids (keys @*links-table*)]
+         (doseq [pid pids]
+           (let [linked (get @*links-table* pid)
+                 broken-links (filter #(= node (pid-to-node-id %1)) linked)]
+               (doseq [broken-pid broken-links]
+                 (send! pid (protocol-link-broken broken-pid pid "node down"))))))
+       (catch Exception ex
+         (log :error (str "*** Exception " (.getMessage ex)))))))
 
 
 (declare self)

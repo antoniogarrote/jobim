@@ -4,7 +4,8 @@
   (:use [jobim.utils :only [hostaddress]])
   (:use [clojure.contrib.logging :only [log]])
   (:require [lamina.core :as acore]
-            [aleph.tcp :as atcp]))
+            [aleph.tcp :as atcp]
+            [gloss.core :as gloss]))
 
 (defonce *nodes-messaging-tcp-znode* "/jobim/messaging/tcp")
 
@@ -29,10 +30,7 @@
 
 (defn send-to-aleph
   ([channel data]
-     (let [to-send (if (instance? (Class/forName "[B") data)
-                     (java.io.ByteArrayInputStream. data)
-                     data)
-           _ (println (str "TO-SEND: " to-send))]
+     (let [to-send (vec data)]
        (acore/enqueue channel to-send))))
 
 (deftype TcpMessagingService [queue port coordination-service serialization-service] MessagingService
@@ -40,15 +38,13 @@
            (check-default-znodes coordination-service (node) (hostaddress) port))
   (publish [this msg]
            (let [node (msg-destiny-node msg)
-                 [host port] (node-data-to-host-port (String. (get-data coordination-service (tcp-node node))))
-                 _ (println (str "NODE+PORT: " [host port]))]
+                 [host port] (node-data-to-host-port (String. (get-data coordination-service (tcp-node node))))]
              (let [channel (acore/wait-for-result (atcp/tcp-client {:host host
-                                                                    :port (if (string? port) (Integer/parseInt port) port)}))
-                   _ (println (str "CHANNEL: " channel))]
+                                                                    :port (if (string? port) (Integer/parseInt port) port)
+                                                                    :frame (gloss/repeated :byte)}))]
                (send-to-aleph channel (encode serialization-service msg))
                (acore/close channel))))
   (set-messages-queue [this new-queue]
-                      (println (str "SET QUEUE " new-queue))
                       (swap! queue (fn [q] new-queue))))
 
 (defn- server-tcp-handler
@@ -56,15 +52,13 @@
      (fn [channel connection-info]
        (acore/receive-all channel
                           (fn [data]
-                            (println (str "RECEIVED DATA FROM ALEPH CHANNEL " data))
-                            (println (str "ENQUEUING IN CHANNEL " @queue))
-                            ;(.put @queue (decode serialization-service data))
-                            (acore/enqueue @queue (decode serialization-service data)))))))
+                            (when (not (empty? data))
+                              (acore/enqueue @queue (decode serialization-service (into-array Byte/TYPE data)))))))))
 
 (defmethod make-messaging-service :tcp
   ([kind configuration coordination-service serialization-service]
      (let [port (if (string? (:port configuration)) (Integer/parseInt (:port configuration)) (:port configuration))
-           _ (println (str "PORT FOR SERVER: " port))
            queue (atom nil)]
-       (atcp/start-tcp-server (server-tcp-handler queue serialization-service) {:port port})
+       (atcp/start-tcp-server (server-tcp-handler queue serialization-service) {:port port
+                                                                                :frame (gloss/repeated :byte)})
        (TcpMessagingService. queue  port coordination-service serialization-service))))
