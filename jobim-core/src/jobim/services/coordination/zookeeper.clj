@@ -35,21 +35,26 @@
 (deftype ZooKeeperCoordinationService [args] jobim.definitions.CoordinationService
   ;; connection
   (connect-coordination [this]
-           (zk/connect args)
+           (apply zk/connect args)
            (check-default-znodes))
   ;; data nodes
   (exists? [this node-path]
-           (zk/exists? node-path))
+           (if (nil? (zk/exists? node-path))
+             false true))
   (delete [this node-path]
           (when (zk/exists? node-path)
             (let [version (:version (second (zk/get-data node-path)))]
               (zk/delete node-path version))))
   (create [this node-path data]
-          (zk/create node-path {:world [:all]} :ephemeral))
+          (zk/create node-path {:world [:all]} :ephemeral)
+          (zk/set-data node-path data 0))
+  (create-persistent [this node-path]
+                     (zk/create node-path {:world [:all]} :persistent))
   (get-data [this node-path]
-            (zk/get-data node-path))
+            (first (zk/get-data node-path)))
   (set-data [this node-path value]
-            (zk/set-data node-path value 0))
+            (let [version (:version (zk/exists? node-path))]
+              (zk/set-data node-path value version)))
   ;; Groups
   (join-group [this group-name group-id value]
               (zk/join-group group-name group-id value))
@@ -63,7 +68,7 @@
                                                                 (.getMessage ex) " "
                                                                 (vec (.getStackTrace ex)))))))))
   (get-children [this group-name]
-                (zk/get-children *node-nodes-znode*))
+                (zk/get-children group-name))
 
   ;; 2-phase commit
   (make-2-phase-commit [this tx-name participants])

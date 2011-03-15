@@ -28,6 +28,9 @@
           "Deletes the coordinated node")
   (create [this node-path data]
           "Creates a new coordinated node path with the provided value")
+
+  (create-persistent [this node-path]
+                     "Creates a new coordinated node path with the provided value that can persist between restarts")
   (get-data [this node-path]
             "Returns the data associated to the provided node-path")
   (set-data [this nodepath value]

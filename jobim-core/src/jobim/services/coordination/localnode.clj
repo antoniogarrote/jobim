@@ -28,6 +28,8 @@
                                (doseq [cb callbacks]
                                  (cb :member-enter val))))
                            (assoc cs node-path data)))))
+  (create-persistent [this node-path]
+                     (create this node-path ""))
   (get-data [this node-path]
             (get @cells node-path))
   (set-data [this node-path value]

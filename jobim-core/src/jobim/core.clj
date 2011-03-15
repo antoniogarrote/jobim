@@ -1,8 +1,8 @@
 (ns jobim.core
   (:require [jobim.events :as jevts])
+  (:require [lamina.core :as lam])
   (:use [jobim.utils]
         [jobim.definitions]
-        [lamina.core :only [channel receive-all]]
         [clojure.contrib.logging :only [log]]))
 
 (defonce *messaging-service* nil)
@@ -278,9 +278,9 @@
        :link-broken (if-let [mbox (pid-to-mbox (:to msg))]
                       (do
                         (remove-link (:to msg) (:from msg))
-                        (.put mbox {:signal :link-broken
-                                    :from (:from msg)
-                                    :cause (:cause (:content msg))}))))))
+                        (lam/enqueue mbox {:signal :link-broken
+                                           :from (:from msg)
+                                           :cause (:cause (:content msg))}))))))
 
 (declare evented-process?)
 (declare send-to-evented)
@@ -290,7 +290,7 @@
        :process (if-let [mbox (pid-to-mbox (:to msg))]
                   (if (evented-process? (:to msg))
                     (send-to-evented (:to msg) msg)
-                    (.put mbox (:content msg))))
+                    (lam/enqueue mbox (:content msg))))
        :link-new (future (handle-link-request msg))
        :rpc     (future (process-rpc msg))
        :rpc-response (future (try
@@ -303,21 +303,24 @@
 (defn node-dispatcher-thread
   "The main thread receiving events and messages"
   ([name id queue]
-     (receive-all queue
-                  (fn [msg]
-                    (try
-                      (do
-                        (condp = (keyword (:type msg))
-                            :msg (dispatch-msg msg)
-                            :signal (dispatch-signal msg)
-                            (log :error (str "*** " name " , " (java.util.Date.) " uknown message type for : " msg))))
-                      (catch Exception ex (log :error (str "***  " name " , " (java.util.Date.) " error processing message : " msg " --> " (.getMessage ex)))))))))
+     (lam/receive-all queue
+                      (fn [msg]
+                        (try
+                          (do
+                            (condp = (keyword (:type msg))
+                                :msg (dispatch-msg msg)
+                                :signal (dispatch-signal msg)
+                                (log :error (str "*** " name " , " (java.util.Date.) " uknown message type for : " msg))))
+                          (catch Exception ex (log :error (str "***  " name " , " (java.util.Date.) " error processing message : " msg " --> " (.getMessage ex)))))))))
 
 (declare bootstrap-node)
 (defn- bootstrap-from-file
   ([file-path]
      (let [config (eval (read-string (slurp file-path)))]
-       (bootstrap-node (:node-name config) (:messaging-type config) (:messaging-options config) (:zookeeper-options config)))))
+       (bootstrap-node (:node-name config)
+                       (:coordination-type config) (:coordination-args config)
+                       (:messaging-type config) (:messaging-args config)
+                       (:serialization-type config) (:serialization-args config)))))
 
 (defn print-node-info
   "Prints the configuration information for a node"
@@ -365,7 +368,7 @@
        (connect-messaging *messaging-service*)
 
        ;; connect messages
-       (let [dispatcher-queue (channel)]
+       (let [dispatcher-queue (lam/channel)]
          (set-messages-queue *messaging-service* dispatcher-queue)
          (swap! *nodes-table* (fn [_] (nodes)))
          (watch-group *coordination-service* *node-nodes-znode*
@@ -393,7 +396,7 @@
   "Returns all the available nodes and their identifiers"
   ([] (let [children (get-children *coordination-service* *node-nodes-znode*)]
         (reduce (fn [m c] (let [data (get-data *coordination-service* (str *node-nodes-znode* "/" c))]
-                            (assoc m c (String. data))))
+                           (assoc m c (String. data))))
                 {}
                 children))))
 
@@ -420,7 +423,7 @@
 (defn- register-local-mailbox
   ([pid]
      (let [process-number (pid-to-process-number pid)
-           q (java.util.concurrent.LinkedBlockingQueue.)]
+           q (lam/channel)]
        (swap! *process-table* (fn [table] (assoc table process-number {:mbox q
                                                                       :dictionary {}})))
        q)))
@@ -577,13 +580,13 @@
              (do (send-to-evented pid (protocol-process-msg (self) pid msg))
                  :ok)
              (let [mbox (pid-to-mbox pid)]
-               (.put mbox msg)
+               (lam/enqueue mbox msg)
                :ok)))
          (remote-send node pid msg)))))
 
 (defn receive
   "Blocks until a new message has been received"
-  ([] (let [msg (.take *mbox*)]
+  ([] (let [msg (lam/wait-for-message *mbox*)]
         msg)))
 
 (defn- register-name-global
@@ -644,11 +647,10 @@
 (defn resolve-node-name
   "Returns the identifier for a provided node name"
   ([node-name]
-     (let [stat (exists? *coordination-service*(str *node-nodes-znode* "/" node-name))]
-       (if stat
-         (let [data (get-data *coordination-service* (str *node-nodes-znode* "/" node-name))]
-           (String. data))
-         (throw (Exception. (str "Unknown node " node-name)))))))
+     (if (exists? *coordination-service*(str *node-nodes-znode* "/" node-name))
+       (let [data (get-data *coordination-service* (str *node-nodes-znode* "/" node-name))]
+         (String. data))
+       (throw (Exception. (str "Unknown node " node-name))))))
 
 (defn rpc-call
   "Executes a non blocking RPC call"
@@ -696,7 +698,7 @@
                              mbox (pid-to-mbox pid)]
                          (binding [*pid* pid
                                    *mbox* mbox]
-                           (let [result (f (.take mbox))]
+                           (let [result (f (lam/wait-for-message mbox))]
                              (when (not= result :evented-loop-continue)
                                (try (clean-process pid)
                                     (catch Exception ex
@@ -751,15 +753,15 @@
 
 (defn react-recur
   ([& vals] (let [old-map (get @*evented-table* (pid-to-process-number *pid*))
-                env (:env old-map)
-                loop (:loop env)]
+                  env (:env old-map)
+                  loop (:loop env)]
             (apply jevts/publish [loop vals])
             :evented-loop-continue)))
 
 (defn send-to-evented
   ([pid msg]
      (let [mbox (pid-to-mbox pid)]
-       (.put mbox (:content msg))
+       (lam/enqueue mbox (:content msg))
        (apply jevts/publish [(str pid ":message") (:content msg)]))))
 
 (defn spawn-evented

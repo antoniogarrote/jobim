@@ -17,7 +17,7 @@
   ([coordination-service node host port]
      (do
        (when (nil? (exists? coordination-service *nodes-messaging-tcp-znode*))
-         (create coordination-service *nodes-messaging-tcp-znode* "/"))
+         (create-persistent coordination-service *nodes-messaging-tcp-znode*))
        (let [tcp-info-node (tcp-node node)]
          (when (exists? coordination-service tcp-info-node)
            (delete coordination-service tcp-info-node))
@@ -56,7 +56,7 @@
 
 (defmethod make-messaging-service :tcp
   ([kind configuration coordination-service serialization-service]
-     (let [port (Integer/parseInt (:port configuration))
+     (let [port (if (string? (:port configuration)) (Integer/parseInt (:port configuration)) (:port configuration))
            queue (atom nil)]
        (atcp/start-tcp-server (server-tcp-handler queue serialization-service) {:port port})
        (TcpMessagingService. queue  port coordination-service serialization-service))))
