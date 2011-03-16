@@ -3,7 +3,8 @@
   (:require [lamina.core :as lam])
   (:use [jobim.utils]
         [jobim.definitions]
-        [clojure.contrib.logging :only [log]]))
+        [clojure.contrib.logging :only [log]])
+  (:import [java.util.concurrent.locks ReentrantLock]))
 
 (defonce *messaging-service* nil)
 (defonce *coordination-service* nil)
@@ -11,6 +12,8 @@
 
 (defonce *pid* nil)
 (defonce *mbox* nil)
+(defonce *save-queue* nil)
+(defonce *mbox-lock* nil)
 (def *process-table* (atom {}))
 (def *evented-table* (atom {}))
 (def *process-count* (atom 0))
@@ -425,9 +428,12 @@
 (defn- register-local-mailbox
   ([pid]
      (let [process-number (pid-to-process-number pid)
-           q (lam/channel)]
+           q (lam/channel)
+           s (lam/channel)]
        (swap! *process-table* (fn [table] (assoc table process-number {:mbox q
-                                                                      :dictionary {}})))
+                                                                      :dictionary {}
+                                                                      :save-queue s
+                                                                      :mbox-lock  (ReentrantLock.)})))
        q)))
 
 (defn- register-rpc-promise
@@ -450,6 +456,20 @@
 (defn pid-to-mbox
   ([pid] (let [rpid (pid-to-process-number pid)]
            (:mbox (get @*process-table* rpid)))))
+
+(defn pid-to-save-queue
+  ([pid] (let [rpid (pid-to-process-number pid)]
+           (:save-queue (get @*process-table* rpid)))))
+
+(defn pid-to-mbox-lock
+  ([pid] (let [rpid (pid-to-process-number pid)]
+           (:mbox-lock (get @*process-table* rpid)))))
+
+(defn with-mbox-lock
+  ([lock f]
+     (do (.lock lock)
+         (f)
+         (finally (.unlock lock)))))
 
 (defn dictionary-write
   ([pid key value]
@@ -534,18 +554,22 @@
 (defn spawn
   "Creates a new local process"
   ([]
-     (let [pid (next-process-id)
-           queue (register-local-mailbox pid)]
+     (let [pid (next-process-id)]
+       (register-local-mailbox pid)
        (create *coordination-service* (zk-process-path pid) " ")
        (set-data *coordination-service* (zk-process-path pid) "running")
        pid))
   ([f]
      (let [pid (spawn)
            mbox (pid-to-mbox pid)
+           save-queue (pid-to-save-queue pid)
+           mbox-lock (pid-to-mbox-lock pid)
            f (if (string? f) (eval-ns-fn f) f)]
        (future
         (binding [*pid* pid
-                  *mbox* mbox]
+                  *mbox* mbox
+                  *save-queue* save-queue
+                  *mbox-lock* mbox-lock]
           (try
            (let [result (f)]
              (clean-process *pid*))
@@ -770,13 +794,20 @@
      (try
       (let [actor-desc (if (string? actor-desc) (eval-ns-fn actor-desc) actor-desc)
             pid (spawn)
-            mbox (pid-to-mbox pid)]
+            mbox (pid-to-mbox pid)
+            save-queue (pid-to-save-queue pid)
+            mbox-lock (pid-to-mbox-lock pid)]
         (swap! *evented-table*
                        (fn [table] (assoc table
                                      (pid-to-process-number pid)
-                                     {:pid pid :mbox mbox :env {:loop nil}})))
+                                     {:pid pid :mbox mbox
+                                      :save-queue save-queue
+                                      :mbox-lock mbox-lock
+                                      :env {:loop nil}})))
         (binding [*pid* pid
-                  *mbox* mbox]
+                  *mbox* mbox
+                  *save-queue* save-queue
+                  *mbox-lock* mbox-lock]
           (apply actor-desc []))
         pid)
       (catch Exception ex
