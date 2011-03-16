@@ -12,8 +12,7 @@
 
 (defonce *pid* nil)
 (defonce *mbox* nil)
-(defonce *save-queue* nil)
-(defonce *mbox-lock* nil)
+(defonce *mbox-data* nil)
 (def *process-table* (atom {}))
 (def *evented-table* (atom {}))
 (def *process-count* (atom 0))
@@ -239,6 +238,48 @@
 
 ;; core functions for nodes
 
+(defn critical-message-dispatch
+  "A protocol to enqueue msgs into an actor
+   mail box supporting selective reception of
+   messages"
+  ([pid msg mbox mbox-data]
+     (with-mbox-lock (:mbox-lock mbox-data)
+       (fn []
+         (let [mbox-filter (:mbox-filter mbox-data)
+               save-queue (:save-queue mbox-data)]
+           (if (nil? filter)
+             ;; There is no selective reception of messages,
+             ;; just regular dispatch
+             (lam/enqueue mbox msg)
+             (if (mbox-filter msg)
+               ;; The selective reception has been successful
+               ;; we deliver, revert the save queue and unlock
+               (do
+                 (lam/enqueue mbox data)
+                 (loop [no-more-saved-msgs (lam/drained? save-queue)]
+                   (if (not no-more-saved-msgs)
+                     (let [saved-msg (lam/wait-for-message save-queue)]
+                       (lam/enqueue mbox saved-msg)
+                       (recur))
+                     (swap! *process-table* (fn [t] (let [mbox-data-p (assoc mbox-data :mbox-filter nil)
+                                                         old-process-data (get t (pid-to-process-number pid))]
+                                                     (assoc t (pid-to-process-number pid)
+                                                            (assoc old-process-data :mbox-data mbox-data-p))))))))
+               ;; The filter does not match, we push the message
+               ;; to the save queue
+               (lam/enqueue save-queue msg))))))))
+
+(defn critical-set-selective-reception
+  "Starts selective reception by setting up
+   an associated filter to the message box"
+  ([pid filter mbox-data]
+     (with-mbox-lock (:mbox-lock mbox-data)
+       (fn []
+         (swap! *process-table* (fn [t] (let [mbox-data-p (assoc mbox-data :mbox-filter filter)
+                                             old-process-data (get t (pid-to-process-number pid))]
+                                         (assoc t (pid-to-process-number pid)
+                                                (assoc old-process-data :mbox-data mbox-data-p)))))))))
+
 (declare pid-to-node-id)
 (defn process-rpc
   "Process an incoming RPC request"
@@ -280,10 +321,16 @@
      (condp = (keyword (:topic msg))
        :link-broken (if-let [mbox (pid-to-mbox (:to msg))]
                       (do
-                        (remove-link (:to msg) (:from msg))
-                        (lam/enqueue mbox {:signal :link-broken
-                                           :from (:from msg)
-                                           :cause (:cause (:content msg))}))))))
+                        (remove-link (:to msg) (:from msg))                        
+                        ;; (lam/enqueue mbox {:signal :link-broken
+                        ;;                    :from (:from msg)
+                        ;;                    :cause (:cause (:content msg))})
+                        (critical-message-dispatch (:to msg)
+                                                   {:signal :link-broken
+                                                    :from (:from msg)
+                                                    :cause (:cause (:content msg))}
+                                                   mbox
+                                                   (pid-to-mbox-data pid)))))))
 
 (declare evented-process?)
 (declare send-to-evented)
@@ -293,7 +340,8 @@
        :process (if-let [mbox (pid-to-mbox (:to msg))]
                   (if (evented-process? (:to msg))
                     (send-to-evented (:to msg) msg)
-                    (lam/enqueue mbox (:content msg))))
+                    ;(lam/enqueue mbox (:content msg))
+                    (critical-message-dispatch (:to msg) (:content msg) mbox (pid-to-mbox-data (:to msg)))))
        :link-new (future (handle-link-request msg))
        :rpc     (future (process-rpc msg))
        :rpc-response (future (try
@@ -429,11 +477,14 @@
   ([pid]
      (let [process-number (pid-to-process-number pid)
            q (lam/channel)
-           s (lam/channel)]
+           s (lam/channel)
+           mbox-data {:save-queue s
+                      :msgs-count 0
+                      :mbox-lock (ReentrantLock.)
+                      :mbox-selector nil}]
        (swap! *process-table* (fn [table] (assoc table process-number {:mbox q
                                                                       :dictionary {}
-                                                                      :save-queue s
-                                                                      :mbox-lock  (ReentrantLock.)})))
+                                                                      :mbox-data mbox-data})))
        q)))
 
 (defn- register-rpc-promise
@@ -457,13 +508,9 @@
   ([pid] (let [rpid (pid-to-process-number pid)]
            (:mbox (get @*process-table* rpid)))))
 
-(defn pid-to-save-queue
+(defn pid-to-mbox-data
   ([pid] (let [rpid (pid-to-process-number pid)]
-           (:save-queue (get @*process-table* rpid)))))
-
-(defn pid-to-mbox-lock
-  ([pid] (let [rpid (pid-to-process-number pid)]
-           (:mbox-lock (get @*process-table* rpid)))))
+           (:mbox-data (get @*process-table* rpid)))))
 
 (defn with-mbox-lock
   ([lock f]
@@ -562,14 +609,12 @@
   ([f]
      (let [pid (spawn)
            mbox (pid-to-mbox pid)
-           save-queue (pid-to-save-queue pid)
-           mbox-lock (pid-to-mbox-lock pid)
+           mbox-data (pid-to-mbox-data pid)
            f (if (string? f) (eval-ns-fn f) f)]
        (future
         (binding [*pid* pid
                   *mbox* mbox
-                  *save-queue* save-queue
-                  *mbox-lock* mbox-lock]
+                  *mbox-data* mbox-data]
           (try
            (let [result (f)]
              (clean-process *pid*))
@@ -585,6 +630,7 @@
   ([] (let [pid (spawn)]
         (alter-var-root #'*pid* (fn [_] pid))
         (alter-var-root #'*mbox* (fn [_] (pid-to-mbox pid)))
+        (alter-var-root #'*mbox-data* (fn [_] (pid-to-mbox-data pid)))
         pid)))
 
 (defn self
@@ -604,15 +650,20 @@
            (if (evented-process? pid)
              (do (send-to-evented pid (protocol-process-msg (self) pid msg))
                  :ok)
-             (let [mbox (pid-to-mbox pid)]
-               (lam/enqueue mbox msg)
+             (let [mbox (pid-to-mbox pid)
+                   mbox-data (pid-to-mbox-data pid)]
+               ;(lam/enqueue mbox msg)
+               (critical-message-dispatch pid msg mbox mbox-data)
                :ok)))
          (remote-send node pid msg)))))
 
 (defn receive
   "Blocks until a new message has been received"
   ([] (let [msg (lam/wait-for-message *mbox*)]
-        msg)))
+        msg))
+  ([filter]
+     (critical-set-selective-reception *pid* filter (pid-to-mbox-data *pid*))
+     (receive)))
 
 (defn- register-name-global
   "Associates a name that can be retrieved from any node and transformed into a PID"
@@ -720,17 +771,22 @@
  ([f] (do (jevts/listen-once (str (self) ":message")
                      (fn [data]
                        (let [pid (react-to-pid (:key data))
-                             mbox (pid-to-mbox pid)]
+                             mbox (pid-to-mbox pid)
+                             mbox-data (pid-to-mbox-data pid)]
                          (binding [*pid* pid
-                                   *mbox* mbox]
-                           (let [result (f (lam/wait-for-message mbox))]
+                                   *mbox* mbox
+                                   *mbox-data* mbox-data]
+                           (let [result (f (lam/wait-for-message mbox))] ;; this does not make sense, data comes in the callback!!!
                              (when (not= result :evented-loop-continue)
                                (try (clean-process pid)
                                     (catch Exception ex
                                       (log :error (str "Error cleaning evented process "
                                                        pid " : " (.getMessage ex) " "
                                                        (vec (.getStackTrace ex))))))))))))
-          :evented-loop-continue)))
+          :evented-loop-continue))
+ ([filter f]
+    (critical-set-selective-reception *pid* filter (pid-to-mbox-data *pid*))
+    (react f)))
 
 (defn react-loop
   ([vals f]
@@ -761,9 +817,11 @@
        (jevts/listen-once future-msg
                      (fn [data]
                        (let [pid (react-to-pid (:key data))
-                             mbox (pid-to-mbox pid)]
+                             mbox (pid-to-mbox pid)
+                             mbox-data (pid-to-mbox-data pid)]
                          (binding [*pid* pid
-                                   *mbox* mbox]
+                                   *mbox* mbox
+                                   *mbox-data* mbox-data]
                            (let [result (handler (:data data))]
                              (when (not= result :evented-loop-continue)
                                (try (clean-process pid)
@@ -785,8 +843,11 @@
 
 (defn send-to-evented
   ([pid msg]
-     (let [mbox (pid-to-mbox pid)]
-       (lam/enqueue mbox (:content msg))
+     (let [mbox (pid-to-mbox pid)
+           mbox-data (pid-to-mbox-data pid)]
+       ;; Evented actors does not need message queues!!!
+       ;(lam/enqueue mbox (:content msg))
+       ;(critical-message-dispatch pid (:content msg) mbox mbox-data)
        (apply jevts/publish [(str pid ":message") (:content msg)]))))
 
 (defn spawn-evented
@@ -795,19 +856,17 @@
       (let [actor-desc (if (string? actor-desc) (eval-ns-fn actor-desc) actor-desc)
             pid (spawn)
             mbox (pid-to-mbox pid)
-            save-queue (pid-to-save-queue pid)
-            mbox-lock (pid-to-mbox-lock pid)]
+            mbox-data { :save-queue save-queue 
+                        :mbox-lock mbox-lock
+                        :msgs-count 0
+                        :mbox-filter nil }]
         (swap! *evented-table*
                        (fn [table] (assoc table
                                      (pid-to-process-number pid)
-                                     {:pid pid :mbox mbox
-                                      :save-queue save-queue
-                                      :mbox-lock mbox-lock
-                                      :env {:loop nil}})))
+                                     mbox-data)))
         (binding [*pid* pid
                   *mbox* mbox
-                  *save-queue* save-queue
-                  *mbox-lock* mbox-lock]
+                  *mbox-data* mbox-data]
           (apply actor-desc []))
         pid)
       (catch Exception ex
