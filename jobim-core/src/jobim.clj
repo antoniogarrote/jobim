@@ -53,8 +53,11 @@
      (apply core/send! [pid msg])))
 
 (defn receive
-  "Blocks until a new message has been received"
-  ([] (apply core/receive [])))
+  "Blocks until a new message has been received
+   a predicate can be passed as an argument for selective reception
+   of messages."
+  ([] (apply core/receive []))
+  ([filter] (apply core/receive [filter])))
 
 (defn register-name
   "Associates a name that can be retrieved from any node to a PID"
@@ -95,6 +98,12 @@
   "Receives a message in an evented actor"
   ([vals-bindings & body]
      `(apply core/react [(fn [~@vals-bindings] ~@body)])))
+
+(defmacro react-selective
+  "Receives a message in an evented actor using selective reception
+   of messages."
+  ([filter vals-bindings & body]
+     `(apply core/react [~filter (fn [~@vals-bindings] ~@body)])))
 
 (defmacro react-loop
   "Creates an evented loop in an actor description"
