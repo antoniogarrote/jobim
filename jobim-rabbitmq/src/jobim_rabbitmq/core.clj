@@ -1,0 +1,1 @@
+(ns jobim-rabbitmq.core)

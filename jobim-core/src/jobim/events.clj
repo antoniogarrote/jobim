@@ -11,10 +11,12 @@
 (defn- reactor-thread
   ([reactor-queue]
      (future (loop [[key data] (wait-for-message reactor-queue)]
-               (let [ch (get @*events-channels* key)]
-                 (when (not (nil? ch))
-                   (enqueue ch {:key key :data data}))
-                 (recur (wait-for-message reactor-queue)))))))
+               (let [ch (get @*events-channels* key)
+                     ch (if (nil? ch)
+                          (let [ch (channel)]  (swap! *events-channels* (fn [chs] (assoc chs key ch)))  ch)
+                          ch)]
+                 (enqueue ch {:key key :data data}))
+                 (recur (wait-for-message reactor-queue))))))
 
 (defn run-multiplexer
   ([num-threads]
