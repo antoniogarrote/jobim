@@ -44,9 +44,9 @@
      (let [result (handle-call server request from state)]
        (cond-match
         [[:noreply ?new-state] result]           [:recur new-state]
-        [[:reply ?reply-data ?new-state] result] (do (send! from reply-data)
+        [[:reply ?reply-data ?new-state] result] (do (send! from [(self) reply-data])
                                                      [:recur new-state])
-        [[:stop ?reply-data] result]             (do (send! from reply-data)
+        [[:stop ?reply-data] result]             (do (send! from [(self) reply-data])
                                                      :norecur)
         [_ result]                               (throw (Exception. (str "Unknown result from handle-call: " result)))))))
 
@@ -68,35 +68,35 @@
 
 (defn- server-actor
   "Defines the loop of a server actor"
-  ([initial-state server]
+  ([initial-msg server]
      (loop [msg (receive)
-            state initial-state]
+            state (init server initial-msg)]
        (let [result (cond-match
                      ;; Call
-                     [[:server-call ?from ?request] msg]  (do-server-call server from request state)
+                     [[:server-call ?pid ?from ?request] msg]  (do-server-call server from request state)
                      ;; Cast
-                     [[:server-cast ?request] msg]         (do-server-cast server request state)
-                     ;; Terminate
-                     [:terminate msg]                      (do (terminate server state) :norecur)
-                     ;; Info
-                     [_ msg]                               (do-handle-info server msg state))]
+                     [[:server-cast ?request] msg]             (do-server-cast server request state)
+                     ;; Terminate                               
+                     [:terminate msg]                          (do (terminate server state) :norecur)
+                     ;; Info                                    
+                     [_ msg]                                   (do-handle-info server msg state))]
          (when (not= result :norecur)
            (recur (receive) (second result)))))))
 
 (defn- server-evented-actor
   "Defiles the evented loop of a server actor"
-  ([initial-state server]
-     (react-loop [state initial-state]
+  ([initial-msg server]
+     (react-loop [state (init server initial-msg)]
        (react [msg]
          (let [result (cond-match
                        ;; Call
-                       [[:server-call ?from ?request] msg]  (do-server-call server from request state)
+                       [[:server-call ?pid ?from ?request] msg]  (do-server-call server from request state)
                        ;; Cast
-                       [[:server-cast ?request] msg]         (do-server-cast server request state)
-                       ;; Terminate
-                       [:terminate msg]                      (do (terminate server state) :norecur)
-                       ;; Info
-                       [_ msg]                               (do-handle-info server msg state))]
+                       [[:server-cast ?request] msg]             (do-server-cast server request state)
+                       ;; Terminate                               
+                       [:terminate msg]                          (do (terminate server state) :norecur)
+                       ;; Info                                    
+                       [_ msg]                                   (do-handle-info server msg state))]
            (when (not= result :norecur)
              (react-recur (second result))))))))
 
@@ -107,8 +107,7 @@
   "Starts a new Server behaviour"
   ([server initial-msg]
      (let [server (eval-class server)
-           initial-state (init server initial-msg)
-             pid (spawn #(server-actor initial-state server))]
+             pid (spawn #(server-actor initial-msg server))]
        pid))
   ([name server initial-msg]
      (let [pid (start server initial-msg)]
@@ -119,8 +118,7 @@
   "Starts a new evented server behaviour"
   ([server initial-msg]
      (let [server (eval-class server)
-           initial-state (init server initial-msg)
-           pid (spawn-evented #(server-evented-actor initial-state server))]
+           pid (spawn-evented #(server-evented-actor initial-msg server))]
        pid))
   ([name server initial-msg]
      (let [pid (start-evented server initial-msg)]
@@ -129,11 +127,11 @@
 (defn send-call!
   "Sends a synchronous request to a server"
   ([pid msg]
-     (send! pid [:server-call (self) msg])
-     (receive))
+     (send! pid [:server-call pid (self) msg])
+     (second (receive #(= (first %) pid))))
   ([pid msg f]
-     (send! pid [:server-call (self) msg])
-     (react [m] (f m))))
+     (send! pid [:server-call pid (self) msg])
+     (react [m] #(= (first %) pid) (f (second m)))))
 
 (defn send-cast!
   "Sends an asynchronous request to a server"
