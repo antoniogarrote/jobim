@@ -379,9 +379,14 @@
 
 (defn dictionary-write
   ([pid key value]
-     (let [process-number (pid-to-process-number pid)
-           dictionary (:dictionary  (get @*process-table* process-number))]
-       (swap! *process-table* (fn [table] (assoc table [process-number :dictionary]  dictionary))))))
+     (let []
+       
+       (swap! *process-table* (fn [table] (let [process-number (pid-to-process-number pid)
+                                               ptable (get table process-number)
+                                               dictionary (:dictionary  ptable)
+                                               dictionary (assoc dictionary key value)
+                                               ptable (assoc ptable :dictionary dictionary)]
+                                           (assoc table process-number ptable)))))))
 (defn dictionary-get
   ([pid key]
      (let [process-number (pid-to-process-number pid)
@@ -391,10 +396,15 @@
 (defn clean-process
   "Clean all data associated to this process locally or remotely"
   ([pid]
-     (let [registered (dictionary-get pid :registered-name)
-           registered-local (dictionary-get pid :registered-name-local)]
+     (let [_ (println (str "*** Cleaning PID " pid))
+           registered (dictionary-get pid :registered-name)
+           _ (println (str "*** Regsitered name? " registered))           
+           registered-local (dictionary-get pid :registered-name-local)
+           _ (println (str "*** Registered local? " registered-local))]
        (delete *coordination-service* (zk-process-path pid))
+       (println (str "*** deleting from coordination service PID "))
        (when (not (nil? registered))
+         (println (str "*** deleting from coordination service registered name " (str *node-names-znode* "/" registered)))
          (delete *coordination-service* (str *node-names-znode* "/" registered)))
        (when (not (nil? registered-local))
          (swap! *local-name-register*
