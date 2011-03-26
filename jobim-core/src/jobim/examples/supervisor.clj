@@ -33,7 +33,7 @@
   ([restart-strategy]
      (supervisor/start
       (supervisor/supervisor-specification
-       restart-strategy                 ; restart strategy -> restart all
+       restart-strategy                 ; restart strategy -> from arguments
        1                                ; one restart max
        20000                            ; each 5 secs
        ; Children specifications

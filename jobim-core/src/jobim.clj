@@ -1,23 +1,6 @@
 (ns jobim
   (:require [jobim.core :as core]))
 
-(defn bootstrap-node
-  "Adds a new node to the distributed application"
-  ([file-path] (apply core/bootstrap-node [file-path]))
-  ([name
-    coordination-type coordination-args
-    messaging-type messaging-args
-    serialization-type serialization-args]
-     (apply core/bootstrap-node [name
-                                 coordination-type coordination-args
-                                 messaging-type messaging-args
-                                 serialization-type serialization-args])))
-
-(defn bootstrap-local
-  "Bootstrap a node without distribution support"
-  ([name]
-     (bootstrap-node name :local {} :local {} :java {})))
-
 (defn nodes
   "Returns all the available nodes and their identifiers"
   ([] (apply core/nodes [])))
@@ -27,7 +10,9 @@
   ([]
      (apply core/spawn []))
   ([f]
-     (apply core/spawn [f])))
+     (apply core/spawn [f]))
+  ([f args]
+     (apply core/spawn [f args])))
 
 (defn spawn-evented
   "Spawns an evented process"
@@ -125,12 +110,34 @@
   ([& vals]
      (apply core/react-recur vals)))
 
-(defn debug-node
-  ([file]
-     (use 'jobim)
-     (use 'jobim.services.coordination.zookeeper)
-     (use 'jobim.services.messaging.tcp)
-     (use 'jobim.services.serialization.java)
 
-     (bootstrap-node file)
+(defn bootstrap-node
+  "Adds a new node to the Jobim cluster"
+  ([file]
+     (let [config (eval (read-string (slurp file)))
+           node-name (or (:node-name config)
+                         (str (.getHostName (java.net.InetAddress/getLocalHost)) "-"
+                              (.replace (java.util.UUID/randomUUID) "-" "")))
+           coordination-type (symbol (str "jobim.services.coordination." (name (or (:coordination-type config) :localnode))))
+           messaging-type (symbol (str "jobim.services.messaging." (name (or (:messaging-type config) :localnode))))
+           serialization-type (symbol (str "jobim.services.serialization." (name (or (:serialization-type config) :java))))]
+       (use coordination-type)
+       (use messaging-type)
+       (use serialization-type)
+       (apply core/bootstrap-node [file])
+       (spawn-in-repl)))
+  ([name
+    coordination-type coordination-args
+    messaging-type messaging-args
+    serialization-type serialization-args]
+     (apply core/bootstrap-node [name
+                                 coordination-type coordination-args
+                                 messaging-type messaging-args
+                                 serialization-type serialization-args])
      (spawn-in-repl)))
+
+(defn bootstrap-local
+  "Bootstrap a node without distribution support"
+  ([name]
+     (bootstrap-node name :local {} :local {} :java {})))
+

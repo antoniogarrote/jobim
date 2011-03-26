@@ -114,9 +114,8 @@
 ;;;;;;;;;;;;;;;;;;
 
 (defn do-philosopher
-  ([name & args]
-     (loop [forks (first args)
-            cycle (second args)]
+  ([name forks life-span]
+     (loop [cycle life-span]
        (if (= 0 cycle)
          (waiter-leaving)
          (do
@@ -131,8 +130,11 @@
            (Thread/sleep (rand 1000))
            (release-forks forks)
            (waiter-finished)
-           (recur forks (dec cycle)))))))
+           (recur (dec cycle)))))))
 
+(defn spawn-philosopher
+  ([name forks life-span]
+     (spawn #(do-philosopher name forks life-span))))
 
 ;; Run it
 
@@ -150,3 +152,28 @@
           (spawn (fn [] (do-philosopher philosopher forks life-span))))
         (receive)
         (println "Dining room closed.\r\n"))))
+
+;; Runs the algorithm in a distributed set of nodes
+(defn dining-distributed
+  ([nodes] (let [clients 5
+            life-span 20]
+        (register-name "dining-room" (self))
+        (register-forks clients)
+        (register-waiter clients)
+        (loop [philosophers [["Plato" [4 0]]
+                             ["Aristotle" [0 1]]
+                             ["Kant" [1 2]]
+                             ["Descartes" [2 3]]
+                             ["Wittgenstein" [3 4]]]
+               nodes (cycle nodes)]
+          (if (empty? philosophers)
+            (do (receive)
+                (println "Dining room closed.\r\n"))
+            (let [[philosopher forks] (first philosophers)
+                  node (first nodes)]
+              (println (str "Starting philosopher " philosopher " in node " node))
+              (rpc-blocking-call (resolve-node-name node)
+                                 "jobim.examples.philosophers/spawn-philosopher"
+                                 [philosopher forks life-span])
+              (recur (rest philosophers)
+                     (rest nodes))))))))

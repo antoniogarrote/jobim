@@ -4,17 +4,21 @@
         [clojure.contrib.logging :only [log]]
         [matchure])
   (:require [lamina.core :as acore]
-            [aleph.tcp :as atcp]))
+            [aleph.tcp :as atcp]
+            [gloss.core :as gloss]))
 
 
 ;; Utility functions
 
-(defn send-to-aleph
+(defn send-to-aleph-bytes
   ([channel data]
-     (let [to-send (if (instance? (Class/forName "[B") data)
-                     (java.io.ByteArrayInputStream. data)
-                     data)]
+     (let [to-send (vec data)]
        (acore/enqueue channel to-send))))
+
+(defn send-to-aleph-string
+  ([channel data]
+     (acore/enqueue channel data)))
+
 
 
 (defprotocol TCP
@@ -43,7 +47,10 @@
                                (fn [data]
                                  (let [msg [:tcp {:topic :tcp-data
                                                   :counter old-counter
-                                                  :dst this} (.array data)]]
+                                                  :dst this}
+                                            (condp = (:frame-kind @state)
+                                               :string  data
+                                              (into-array Byte/TYPE data))]]
                                    (if (:active @state)
                                      (send! (:pid @state) msg)
                                      (.put (:queue @state) msg)))))
@@ -51,14 +58,24 @@
 
 (deftype TCPServerImpl [state] jobim.behaviours.tcp.TCP
   (init-server [this port opts]
-               (let [active (:active (or opts {:active true}))]
-                 (swap! state (fn [old-state] (assoc old-state :active active)))
-                 (swap! state (fn [old-state] (assoc old-state :pid (self))))
+               (let [active (or (:active opts) true)
+                     frame-kind (or (:frame opts) :string)
+                     frame (condp = frame-kind
+                               :bytes (gloss/repeated :byte)
+                               :string (gloss/string :utf-8)
+                               frame-kind)]
+                 (swap! state (fn [old-state] (-> old-state
+                                                 (assoc :active active)
+                                                 (assoc :pid (self))
+                                                 (assoc :frame-kind frame-kind))))
                  (atcp/start-tcp-server (server-tcp-handler state (:pid @state) this)
-                                        {:port port})))
+                                        {:port port
+                                         :frame frame})))
   (init-client [this host port opts]
                (throw (Exception. "Impossible to init a client from a TCP server implementation")))
-  (send-tcp-inner! [this counter msg](try (send-to-aleph (get (:channels @state) counter) msg)
+  (send-tcp-inner! [this counter msg](try (condp = (:frame-kind @state)
+                                              :string (send-to-aleph-string (get (:channels @state) counter) msg)
+                                              (send-to-aleph-bytes (get (:channels @state) counter) msg))
                                           (catch Exception ex (do (log :error (str "ERROR!!" (.getMessage ex)))
                                                                   (let [old-chns (:channels @state)]
                                                                     (swap! state (fn [old-state]
@@ -75,23 +92,35 @@
 (defn client-tcp-handler
   ([state]
      (fn [data]
-       (log :debug (str "*** received data in the client " (.array data)))
-       (if (:active @state)
-         (send! (:pid @state) [:tcp (:channel @state) (.array data)])
-         (.put (:queue @state) [:tcp (:channel @state) (.array data)])))))
+       (let [msg (condp = (:frame-kind @state)
+                     :string data
+                     (into-array Byte/TYPE data))]
+         (log :debug (str "*** received data in the client " msg))
+         (if (:active @state)
+           (send! (:pid @state) [:tcp (:channel @state) msg])
+           (.put (:queue @state) [:tcp (:channel @state) msg]))))))
 
 
 (deftype TCPClientImpl [state] jobim.behaviours.tcp.TCP
   (init-server [this port opts] (throw (Exception. "Impossible to init a server from a TCP client implementation")))
   (init-client [this host port opts]
-               (let [active (:active (or opts {:active true}))]
-                 (swap! state (fn [old-state] (assoc old-state :active active)))
-                 (swap! state (fn [old-state] (assoc old-state :pid (self))))
-                 (swap! state (fn [old-state] (assoc old-state :channel
-                                                    (acore/wait-for-result (atcp/tcp-client
-                                                                            {:host host :port port})))))
+               (let [active (or (:active opts) true)
+                     frame-kind (or (:frame opts) :string)
+                     frame (condp = frame-kind
+                               :bytes (gloss/repeated :byte)
+                               :string (gloss/string :utf-8)
+                               frame-kind)]
+                 (swap! state (fn [old-state] (-> old-state
+                                                 (assoc :active active)
+                                                 (assoc :pid (self))
+                                                 (assoc :frame-kind frame-kind)
+                                                 (assoc :channel (acore/wait-for-result (atcp/tcp-client
+                                                                                         {:host host :port port
+                                                                                          :frame frame}))))))
                  (acore/receive-all (:channel @state) (client-tcp-handler state))))
-  (send-tcp-inner! [this counter msg] (send-to-aleph (:channel @state) msg))
+  (send-tcp-inner! [this counter msg] (if (= (:frame-kind @state) :bytes)
+                                        (send-to-aleph-bytes (:channel @state) msg)
+                                        (send-to-aleph-string (:channel @state) msg)))
   (set-active [this boolean] (swap! state (fn [old-state] (assoc old-state :active boolean))))
   (set-controlling-actor [this pid] (swap! state (fn [old-state] (assoc old-state :pid pid))))
   (receive-tcp [this] (if (:active @state)

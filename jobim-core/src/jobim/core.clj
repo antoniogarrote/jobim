@@ -396,15 +396,10 @@
 (defn clean-process
   "Clean all data associated to this process locally or remotely"
   ([pid]
-     (let [_ (println (str "*** Cleaning PID " pid))
-           registered (dictionary-get pid :registered-name)
-           _ (println (str "*** Regsitered name? " registered))           
-           registered-local (dictionary-get pid :registered-name-local)
-           _ (println (str "*** Registered local? " registered-local))]
+     (let [registered (dictionary-get pid :registered-name)
+           registered-local (dictionary-get pid :registered-name-local)]
        (delete *coordination-service* (zk-process-path pid))
-       (println (str "*** deleting from coordination service PID "))
        (when (not (nil? registered))
-         (println (str "*** deleting from coordination service registered name " (str *node-names-znode* "/" registered)))
          (delete *coordination-service* (str *node-names-znode* "/" registered)))
        (when (not (nil? registered-local))
          (swap! *local-name-register*
@@ -490,7 +485,9 @@
              (notify-links *pid* (str (class ex) ":" (.getMessage ex)))
              (remove-links *pid*)
              (clean-process *pid*)))))
-         pid)))
+       pid))
+  ([f args]
+     (spawn (fn [] (apply f args)))))
 
 (defn spawn-in-repl
   "Creates a new process attached to the running shell"

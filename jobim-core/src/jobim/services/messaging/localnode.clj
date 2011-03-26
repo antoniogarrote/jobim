@@ -10,6 +10,6 @@
   (set-messages-queue [this new-queue]
                       (swap! queue (fn [q] new-queue))))
 
-(defmethod make-messaging-service :local
+(defmethod make-messaging-service :localnode
   ([kind configuration coordination-service serialization-service]
      (LocalNodeMessagingService. (atom nil) coordination-service serialization-service)))

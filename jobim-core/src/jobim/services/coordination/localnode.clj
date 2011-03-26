@@ -102,6 +102,6 @@
                                       tx-m)))))
                 "rollback")))
 
-(defmethod make-coordination-service :local
+(defmethod make-coordination-service :localnode
   ([kind configuration]
      (LocalNodeCoordinationService. (atom {}) (atom {}) (atom {}))))

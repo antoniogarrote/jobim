@@ -10,8 +10,8 @@
        (loop [msg (receive)
               counter 0]
          (cond-match
-          [[:tcp ?tcp-act ?data] msg]  (do (println (str (self)  " - RECEIVED " (String. data)))
-                                           (send-tcp! tcp-act (.getBytes (str "PONG-" counter "-" (String. data))))
+          [[:tcp ?tcp-act ?data] msg]  (do (println (str (self)  " - RECEIVED " data))
+                                           (send-tcp! tcp-act (str "PONG-" counter "-" data))
                                            (recur (receive) (inc counter)))
           [[:tcp :close ?ex] msg]      (do (println (str (self) " - TCP socket closed: " ex))
                                            (println (str "exiting..."))))))))
@@ -26,7 +26,7 @@
              (send-tcp! cs (str "count-" c))
              (Thread/sleep st)
              (let [[tcp ch msg] (receive)]
-               (log :error (str "Client " c " val " (String. msg)))
+               (log :error (str "Client " c " val " msg))
                (recur (dec r)))))))))
 
 

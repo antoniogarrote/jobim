@@ -7,10 +7,11 @@
 (defonce *node-nodes-znode* "/jobim/nodes")
 (defonce *node-processes-znode* "/jobim/processes")
 (defonce *node-messaging-znode* "/jobim/messaging")
-(defonce *node-messaging-rabbitmq-znode* "/jobim/messaging/rabbitmq")
-(defonce *node-messaging-zeromq-znode* "/jobim/messaging/zeromq")
 (defonce *node-names-znode* "/jobim/names")
 (defonce *node-links-znode* "/jobim/links")
+;; move this into the rabbitmq and zerom plugins
+(defonce *node-messaging-rabbitmq-znode* "/jobim/messaging/rabbitmq")
+(defonce *node-messaging-zeromq-znode* "/jobim/messaging/zeromq")
 
 (defn check-default-znodes
   "Creates the default znodes for the distributed application to run"
