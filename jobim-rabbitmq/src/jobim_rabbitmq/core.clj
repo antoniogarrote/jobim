@@ -259,4 +259,3 @@
                     routing-key
                     nil
                     (if (string? message) (.getBytes message) message))))
-

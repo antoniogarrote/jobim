@@ -139,5 +139,5 @@
 (defn bootstrap-local
   "Bootstrap a node without distribution support"
   ([name]
-     (bootstrap-node name :local {} :local {} :java {})))
+     (bootstrap-node name :localnode {} :localnode {} :java {})))
 

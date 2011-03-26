@@ -5,7 +5,7 @@
 
 (deftest test-data-access
   (println "*** test-data-access")
-  (let [coord (make-coordination-service :local {})]
+  (let [coord (make-coordination-service :localnode {})]
     (create coord "/jobim/test" "init")
     (is (= "init" (get-data coord "/jobim/test")))
     (is (true? (exists? coord "/jobim/test")))
@@ -16,13 +16,13 @@
 
 (deftest test-connect
   (println "*** test-connect")
-  (let [coord (make-coordination-service :local {})]
+  (let [coord (make-coordination-service :localnode {})]
     (is (= :ignore (connect-coordination coord)))))
 
 
 (deftest test-groups
   (println "*** test-groups")
-  (let [coord (make-coordination-service :local {})]
+  (let [coord (make-coordination-service :localnode {})]
     (create coord "/jobim/tests/t1" "init1")
     (create coord "/jobim/tests/t2" "init2")
     (join-group coord "/jobim/tests" "t1" "data1")
@@ -33,7 +33,7 @@
 
 (deftest test-2pc-success
   (println "*** test-2pc-success")
-  (let [coord (make-coordination-service :local {})]
+  (let [coord (make-coordination-service :localnode {})]
     (make-2-phase-commit coord "tx" ["a" "b"])
     (let [val (atom 0)
           post (promise)]
@@ -49,7 +49,7 @@
 
 (deftest test-2pc-rollback
   (println "*** test-2pc-rollback")
-  (let [coord (make-coordination-service :local {})]
+  (let [coord (make-coordination-service :localnode {})]
     (make-2-phase-commit coord "tx" ["a" "b"])
     (let [val (atom 0)
           post (promise)]

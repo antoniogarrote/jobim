@@ -3,7 +3,9 @@
   (:use [clojure.test])
   (:require [lamina.core :as lam]))
 
-(run-multiplexer 2)
+
+; Multiplexer is already running when passing the whole test suite
+;(run-multiplexer 2)
 
 (deftest test-register-handle-send-event-1
   (println "*** test-register-handle-send-event-1")
