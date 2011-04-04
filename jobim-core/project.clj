@@ -1,4 +1,4 @@
-(defproject jobim-core "0.1.1-SNAPSHOT"
+(defproject jobim-core "0.1.2-SNAPSHOT"
   :description "Actors library for Clojure"
   :dependencies [[org.clojure/clojure "1.2.0"]
                  [org.clojure/clojure-contrib "1.2.0"]

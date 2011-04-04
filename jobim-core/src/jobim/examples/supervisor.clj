@@ -35,7 +35,7 @@
       (supervisor/supervisor-specification
        restart-strategy                 ; restart strategy -> from arguments
        1                                ; one restart max
-       20000                            ; each 5 secs
+       20000                            ; each 20 secs
        ; Children specifications
        [(supervisor/child-specification
          "test-client-1"

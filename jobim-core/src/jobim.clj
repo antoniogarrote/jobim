@@ -121,6 +121,7 @@
            coordination-type (symbol (str "jobim.services.coordination." (name (or (:coordination-type config) :localnode))))
            messaging-type (symbol (str "jobim.services.messaging." (name (or (:messaging-type config) :localnode))))
            serialization-type (symbol (str "jobim.services.serialization." (name (or (:serialization-type config) :java))))]
+       (use 'jobim.definitions)
        (use coordination-type)
        (use messaging-type)
        (use serialization-type)

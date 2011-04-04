@@ -119,7 +119,7 @@
        (if (= 0 cycle)
          (waiter-leaving)
          (do
-           (println (str name " is thinking (" cycle " remaining).\r\n"))
+           (println (str name " is thinking. \r\n"))
            (Thread/sleep (rand 1000))
            (println (str name " is hungry.\r\n"))
            (waiter-wait forks)
