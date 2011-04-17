@@ -62,7 +62,7 @@
                   (ZooKeeper. servers-str session-timeout (watcher watcher-fn))
                   (ZooKeeper. servers-str session-timeout (watcher watcher-fn (long session-id) (.getBytes password))))]
          @prom
-         (dosync (swap! connection (fn [_] zk)))
+         (swap! connection (fn [_] zk))
          {:servers servers
           :session-timeout session-timeout
           :session-id session-id

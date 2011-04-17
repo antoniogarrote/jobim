@@ -4,7 +4,8 @@
   (:use [jobim.utils]
         [jobim.definitions]
         [clojure.contrib.logging :only [log]])
-  (:import [java.util.concurrent LinkedBlockingQueue]))
+  ;(:import [java.util.concurrent LinkedBlockingQueue])
+  (:import [java.util LinkedList]))
 
 (defonce *messaging-service* nil)
 (defonce *coordination-service* nil)
@@ -148,10 +149,6 @@
 
 ;; core functions for nodes
 
-(defn empty-save-queue?
-  ([q]
-     (nil? (.peek q))))
-
 (declare pid-to-node-id)
 (defn process-rpc
   "Process an incoming RPC request"
@@ -195,21 +192,27 @@
 (defn dispatch-signal
   ([msg]
      (condp = (keyword (:topic msg))
-       :link-broken (if-let [mbox (pid-to-mbox (:to msg))]
-                      (do
-                        (remove-link (:to msg) (:from msg))
-                        (critical-message-dispatch (:to msg)
-                                                   {:signal :link-broken
-                                                    :from (:from msg)
-                                                    :cause (:cause (:content msg))}))))))
+         :link-broken (let [signal-msg {:signal :link-broken
+                                        :from (:from msg)
+                                        :cause (:cause (:content msg))}]
+                        (if (evented-process? (:to msg))
+                          (do
+                            (remove-link (:to msg) (:from msg))
+                            (send-to-evented (:to msg)
+                                             signal-msg))
+                          (if-let [mbox (pid-to-mbox (:to msg))]
+                            (do
+                              (remove-link (:to msg) (:from msg))
+                              (critical-message-dispatch (:to msg)
+                                                         signal-msg))))))))
 
 (defn dispatch-msg
   ([msg]
      (condp = (keyword (:topic msg))
-       :process (if-let [mbox (pid-to-mbox (:to msg))]
-                  (if (evented-process? (:to msg))
-                    (send-to-evented (:to msg) msg)
-                    (critical-message-dispatch (:to msg) (:content msg))))
+       :process  (if (evented-process? (:to msg))
+                   (send-to-evented (:to msg) msg)
+                   (if-let [mbox (pid-to-mbox (:to msg))]
+                     (critical-message-dispatch (:to msg) (:content msg))))
        :link-new (future (handle-link-request msg))
        :rpc     (future (process-rpc msg))
        :rpc-response (future (try
@@ -277,8 +280,8 @@
        ;; store node configuration
        (swap! *node-id* (fn [_] id))
        ;; Launch evented processing of events
-       (jevts/run-multiplexer 1)
-
+       (jevts/run-multiplexer 1 ;;(num-processors)
+                              )
        ;; binding of core services
        (alter-var-root #'*serialization-service* (fn [_] (make-serialization-service serialization-type serialization-args)))
        (alter-var-root #'*coordination-service* (fn [_] (make-coordination-service coordination-type coordination-args)))
@@ -331,10 +334,10 @@
         rpc)))
 
 (defn pid-to-process-number
-  ([pid] (last (vec (.split pid "\\.")))))
+  ([^String pid] (last (vec (.split pid "\\.")))))
 
 (defn pid-to-node-id
-  ([pid] (first (vec (.split pid "\\.")))))
+  ([^String pid] (first (vec (.split pid "\\.")))))
 
 (defn evented-process?
   ([pid]
@@ -342,10 +345,10 @@
 
 
 (defn- register-local-mailbox
-  ([pid]
+  ([pid is-evented]
      (let [process-number (pid-to-process-number pid)
-           q (lam/channel)
-           s (LinkedBlockingQueue.)
+           q (if (not is-evented) (lam/channel) nil)
+           s (LinkedList.)
            mbox-data {:save-queue s}]
        (swap! *process-table* (fn [table] (assoc table process-number {:mbox q
                                                                       :dictionary {}
@@ -460,14 +463,18 @@
          (publish *messaging-service* msg))
        (throw (Exception. (str "Non existent remote process " pid))))))
 
+(defn- initialize-actor
+  ([is-evented]
+     (let [^String pid (next-process-id)]
+       (register-local-mailbox pid is-evented)
+       (create *coordination-service* (zk-process-path pid) " ")
+       (set-data *coordination-service* (zk-process-path pid) "running")
+       pid)))
+
 (defn spawn
   "Creates a new local process"
   ([]
-     (let [pid (next-process-id)]
-       (register-local-mailbox pid)
-       (create *coordination-service* (zk-process-path pid) " ")
-       (set-data *coordination-service* (zk-process-path pid) "running")
-       pid))
+     (initialize-actor false))
   ([f]
      (let [pid (spawn)
            mbox (pid-to-mbox pid)
@@ -560,7 +567,7 @@
   ([]
      (let [children (get-children *coordination-service* *node-names-znode*)]
        (reduce (fn [m c] (let [data (get-data *coordination-service* (str *node-names-znode* "/" c))]
-                           (assoc m c (String. data))))
+                          (assoc m c (String. data))))
                {}
                children))))
 
@@ -662,10 +669,10 @@
   
 (defn- do-save-queue
   "Tries to find a matching event in the saved queue for the handler of an evented actor"
-  ([mbox-filter save-queue]
+  ([mbox-filter ^LinkedList save-queue]
      ;; Look for a potential match or the filter in the save queue
      (loop [msg (.poll save-queue)
-            new-save-queue (LinkedBlockingQueue.)
+            new-save-queue (LinkedList.)
             matching-msg nil]
        ;; End of the saved queue
        (if (nil? msg)
@@ -678,19 +685,19 @@
                 msg)
          ;; no matching message
          (recur (.poll save-queue)
-                (do (.put new-save-queue msg) new-save-queue)
+                (do (.add new-save-queue msg) new-save-queue)
                 matching-msg))))))
 
 (defn critical-message-selective-reception
   ([mbox-filter]
      (let [save-queue (:save-queue (pid-to-mbox-data *pid*))
-           [matching-msg new-save-queue] (do-save-queue mbox-filter save-queue)
+           [matching-msg ^LinkedList new-save-queue] (do-save-queue mbox-filter save-queue)
            _ (update-save-queue *pid* new-save-queue)]
        (if (nil? matching-msg)
          (loop [msg (lam/wait-for-message *mbox*)]
            (if (mbox-filter msg)
              msg
-             (do (.put new-save-queue msg)
+             (do (.add new-save-queue msg)
                  (recur (lam/wait-for-message *mbox*)))))
          matching-msg))))
 
@@ -708,8 +715,9 @@
                                 msg (:content (:data data))]
                             (if (mbox-filter msg)
                               (data-handler data)
-                              (do (.put (:save-queue (pid-to-mbox-data pid)) msg)
-                                  (jevts/listen-once handler-id @callee)))))]
+                              (let [^LinkedList this-save-queue (:save-queue (pid-to-mbox-data pid))]
+                                (.add this-save-queue msg)
+                                (jevts/listen-once handler-id @callee)))))]
            (swap! callee (fn [_] callback))
            (jevts/listen-once handler-id callback))
          (f matching-msg)))))
@@ -729,7 +737,7 @@
 (def *react-loop-id* nil)
 
 (defn react-to-pid
-  ([evt-key] (aget (.split evt-key ":") 0)))
+  ([^String evt-key] (first (vec (.split evt-key ":")))))
 
 (defn react
   ([f] (do (critical-message-reception-evented f)
@@ -738,11 +746,28 @@
      (do (critical-message-selective-reception-evented f filter)
          :evented-loop-continue)))
 
+(defn react-break
+  ([]
+     (let [pid *pid*
+           old-map (get @*evented-table* (pid-to-process-number pid))
+           mbox (:mbox old-map)
+           env (:env old-map)
+           react-loop-id (get env :loop)]
+       (try (do
+              (clean-process pid)
+              ;(println (str "FINISHING LOOP " react-loop-id))
+              (jevts/finish react-loop-id))
+            (catch Exception ex
+              (log :error (str "Error cleaning evented process "
+                               pid " : " (.getMessage ex) " "
+                               (vec (.getStackTrace ex)))))))))
+
 (defn react-loop
   ([vals f]
      (let [react-loop-id (str (self) ":react-loop-" (random-uuid))]
        (jevts/listen react-loop-id
-                     (fn [data] (let [pid (react-to-pid (:key data))
+                     (fn [data] (let [;_ (println (str "*** REACT LOOP"))
+                                     pid (react-to-pid (:key data))
                                      old-map (get @*evented-table* (pid-to-process-number pid))
                                      mbox (:mbox old-map)
                                      env (:env old-map)
@@ -754,12 +779,9 @@
                                            *mbox* mbox]
                                    (let [result (apply f (:data data))]
                                      (when (not= result :evented-loop-continue)
-                                       (try (clean-process pid)
-                                            (catch Exception ex
-                                              (log :error (str "Error cleaning evented process "
-                                                               pid " : " (.getMessage ex) " "
-                                                               (vec (.getStackTrace ex))))))))))))
-       (apply jevts/publish [react-loop-id vals]))))
+                                       (react-break)))))))
+       (apply jevts/publish [react-loop-id vals])
+       :evented-loop-continue)))
 
 (defn react-future
   ([action handler]
@@ -775,6 +797,7 @@
                            (let [result (handler (:data data))]
                              (when (not= result :evented-loop-continue)
                                (try (clean-process pid)
+                                    (jevts/finish future-msg)
                                     (catch Exception ex
                                       (log :error (str "Error cleaning evented process "
                                                        pid " : " (.getMessage ex) " "
@@ -800,7 +823,7 @@
   ([actor-desc]
      (try
       (let [actor-desc (if (string? actor-desc) (eval-ns-fn actor-desc) actor-desc)
-            pid (spawn)
+            pid (initialize-actor true)
             mbox (pid-to-mbox pid)
             mbox-data (pid-to-mbox-data pid)]
         (swap! *evented-table*
@@ -810,7 +833,13 @@
         (binding [*pid* pid
                   *mbox* mbox
                   *mbox-data* mbox-data]
-          (apply actor-desc []))
+          (let [result (apply actor-desc [])]
+            (when (not= result :evented-loop-continue)
+              (try (clean-process pid)
+                   (catch Exception ex
+                     (log :error (str "Error cleaning evented process "
+                                      pid " : " (.getMessage ex) " "
+                                      (vec (.getStackTrace ex)))))))))
         pid)
       (catch Exception ex
         (log :error (str "Exception spawning evented " (.getMessage ex) " " (vec (.getStackTrace ex))))))))

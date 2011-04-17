@@ -1,6 +1,10 @@
 (ns jobim
   (:require [jobim.core :as core]))
 
+(defn node
+  "Returns the identifier of the current node"
+  ([] (apply core/node [])))
+
 (defn nodes
   "Returns all the available nodes and their identifiers"
   ([] (apply core/nodes [])))
@@ -110,6 +114,9 @@
   ([& vals]
      (apply core/react-recur vals)))
 
+(defn react-break
+  "Breaks an evented recursion loop"
+  ([] (apply core/react-break [])))
 
 (defn bootstrap-node
   "Adds a new node to the Jobim cluster"

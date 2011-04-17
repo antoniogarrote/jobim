@@ -53,7 +53,8 @@
        (acore/receive-all channel
                           (fn [data]
                             (when (not (empty? data))
-                              (acore/enqueue @queue (decode serialization-service (into-array Byte/TYPE data)))))))))
+                              (let [msg (decode serialization-service (into-array Byte/TYPE data))]
+                                (acore/enqueue @queue msg))))))))
 
 (defmethod make-messaging-service :tcp
   ([kind configuration coordination-service serialization-service]

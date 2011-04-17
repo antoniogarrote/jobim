@@ -1,6 +1,24 @@
 (ns jobim.services.coordination.localnode
   (use [jobim.definitions]))
 
+(defn- do-set-data
+  ([cells ^String node-path ^String value]
+     (swap! cells (fn [cs] (let [cell (get cs node-path)]
+                                   (if (not (nil? cell))
+                                     (assoc cs node-path value)
+                                     cs))))))
+
+(defn- do-create
+  ([cells groups ^String node-path ^String data]
+     (swap! cells (fn [cs]
+                    (let [pair (first (filter (fn [[^String name callbacks]] (= 0 (.indexOf node-path name))) @groups))]
+                      (when (not (nil? pair))
+                        (let [[^String group callbacks] pair
+                              val (aget (.split node-path (str group "/")) 1)]
+                          (doseq [cb callbacks]
+                            (cb :member-enter val))))
+                      (assoc cs node-path data))))))
+
 (deftype LocalNodeCoordinationService [tx-map cells groups] jobim.definitions.CoordinationService
   ;; connection
   (connect-coordination [this] :ignore)
@@ -20,23 +38,13 @@
                                      (dissoc cs node-path))
                                    cs)))))
   (create [this node-path data]
-          (swap! cells (fn [cs]
-                         (let [pair (first (filter (fn [[name callbacks]] (= 0 (.indexOf node-path name))) @groups))]
-                           (when (not (nil? pair))
-                             (let [[group callbacks] pair
-                                   val (aget (.split node-path (str group "/")) 1)]
-                               (doseq [cb callbacks]
-                                 (cb :member-enter val))))
-                           (assoc cs node-path data)))))
+          (do-create cells groups node-path data))
   (create-persistent [this node-path]
                      (create this node-path ""))
   (get-data [this node-path]
             (get @cells node-path))
   (set-data [this node-path value]
-            (swap! cells (fn [cs] (let [cell (get cs node-path)]
-                                   (if (not (nil? cell))
-                                     (assoc cs node-path value)
-                                     cs)))))
+            (do-set-data cells node-path value))
   ;; groups
   (join-group [this group-name group-id value]
               (create this (str group-name "/" group-id) value))
