@@ -14,43 +14,34 @@
 ;; base time
 
 (defn fib
-  ([x] (condp = x
-           0 1
-           1 1
-           (+ (fib (dec x)) (fib (- x 2))))))
+  ([x] (if (< x 2)
+         x
+         (+ (fib (dec x)) (fib (- x 2))))))
 
 ;; Spawn test
 
 (defn do-spawn-test
-  ([x acum sync]
+  ([x]
      (if (> x 0)
-       (let [time (with-time (spawn #(do-spawn-test (dec x) acum sync)))]
-         (swap! acum conj time))
-       (deliver sync :ok))))
+       (do (spawn (fn [] x))
+           (do-spawn-test (- x 1)))
+       :ok)))
 
 (defn spawn-test
   ([total]
-     (let [acum (atom [])
-           sync (promise)]
-       (do-spawn-test total acum sync)
-       @sync
-       @acum)))
+     (with-time (do-spawn-test total))))
 
 (defn do-spawn-test-evented
-  ([x acum sync]
+  ([x]
      (if (> x 0)
-       (let [time (with-time (spawn-evented #(react-loop []
-                                               (do-spawn-test-evented (dec x) acum sync))))]
-         (swap! acum conj time))
-       (deliver sync :ok))))
+       (do
+         (spawn-evented (fn [] x))
+         (do-spawn-test-evented (- x 1)))
+       :ok)))
 
 (defn spawn-test-evented
   ([total]
-     (let [acum (atom [])
-           sync (promise)]
-       (do-spawn-test-evented total acum sync)
-       @sync
-       @acum)))
+     (with-time (do-spawn-test-evented total))))
 
 ;; Send test
 
@@ -157,7 +148,7 @@
 
 (defn ping-pong-test
   ([num size]
-     (let [data (map (fn [_] true) (range 0 size))
+     (let [data (vec (take size (repeat true)))
            remote (ping-pong-server)]
        (loop [times []
               it num]
@@ -172,14 +163,13 @@
        #(react-loop []
           (react [[from data]]
                  (do
-                   (println (str "received " data " from " from))
                    (send! from data)
                    (react-recur)))))))
 
 
 (defn ping-pong-test-evented
   ([num size]
-     (let [data (map (fn [_] true) (range 0 size))
+     (let [data (vec (take size (repeat true)))
            remote (ping-pong-server-evented)
            sync (promise)]
        (spawn-evented
@@ -218,7 +208,7 @@
            sync (promise)]
        (spawn-evented
         #(react-loop [times []
-                     it num]
+                      it num]
              (if (= it 0)
                (deliver sync times)
                (let [time (with-time (send! remote [(self) data]))]
