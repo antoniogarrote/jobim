@@ -199,7 +199,7 @@
 
 (defn ping-pong-remote-test
   ([remote-node num size]
-     (let [data (map (fn [_] true) (range 0 size))
+     (let [data (vec (take size (repeat true)))
            remote (rpc-blocking-call (resolve-node-name remote-node)
                                      "jobim.examples.benchmarking/ping-pong-server" [])]
        (loop [times []
@@ -212,7 +212,7 @@
 
 (defn ping-pong-remote-test-evented
   ([remote-node num size]
-     (let [data (map (fn [_] true) (range 0 size))
+     (let [data  (vec (take size (repeat true)))
            remote (rpc-blocking-call (resolve-node-name remote-node)
                                      "jobim.examples.benchmarking/ping-pong-server-evented" [])
            sync (promise)]
