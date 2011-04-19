@@ -1,5 +1,6 @@
 (ns jobim.examples.benchmarking
-  (:use [jobim]))
+  (:use [jobim]
+        [jobim.utils]))
 
 (defn avg
   ([c]
@@ -29,7 +30,7 @@
 
 (defn spawn-test
   ([total]
-     (with-time (do-spawn-test total))))
+     (/ (with-time (do-spawn-test total)) total)))
 
 (defn do-spawn-test-evented
   ([x]
@@ -41,7 +42,7 @@
 
 (defn spawn-test-evented
   ([total]
-     (with-time (do-spawn-test-evented total))))
+     (/ (with-time (do-spawn-test-evented total)) total)))
 
 ;; Send test
 
@@ -143,7 +144,7 @@
 (defn ping-pong-client
   ([server data]
      (do
-       (send! server [(self) data])
+       (send! server (mlist (self) data))
        (receive))))
 
 (defn ping-pong-test
@@ -177,7 +178,7 @@
                      it num]
              (if (= it 0)
                (deliver sync times)
-               (let [time (with-time (send! remote [(self) data]))]
+               (let [time (with-time (send! remote (mlist (self) data)))]
                  (react [_]
                    (react-recur (conj times time)
                                 (dec it)))))))
@@ -189,9 +190,9 @@
 
 (defn ping-pong-remote-test
   ([remote-node num size]
-     (let [data (vec (take size (repeat true)))
+     (let [data (apply mlist (vec (take size (repeat true))))
            remote (rpc-blocking-call (resolve-node-name remote-node)
-                                     "jobim.examples.benchmarking/ping-pong-server" [])]
+                                     "jobim.examples.benchmarking/ping-pong-server" (mlist))]
        (loop [times []
               it num]
          (if (= it 0)
@@ -202,16 +203,16 @@
 
 (defn ping-pong-remote-test-evented
   ([remote-node num size]
-     (let [data  (vec (take size (repeat true)))
+     (let [data  (apply mlist (vec (take size (repeat true))))
            remote (rpc-blocking-call (resolve-node-name remote-node)
-                                     "jobim.examples.benchmarking/ping-pong-server-evented" [])
+                                     "jobim.examples.benchmarking/ping-pong-server-evented" (mlist))
            sync (promise)]
        (spawn-evented
         #(react-loop [times []
                       it num]
              (if (= it 0)
                (deliver sync times)
-               (let [time (with-time (send! remote [(self) data]))]
+               (let [time (with-time (send! remote (mlist (self) data)))]
                  (react [_]
                    (react-recur (conj times time)
                                 (dec it)))))))

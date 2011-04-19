@@ -181,3 +181,12 @@ without blocking."
              (if (nil? (:exception result))
                (:success result)
                (throw (:exception result))))))))
+
+(defn mlist
+  ([& args]
+     (let [a (java.util.ArrayList.)]
+        (loop [xs args]
+          (if (empty? xs)
+            a
+            (do (.add a (first xs))
+                (recur (rest xs))))))))

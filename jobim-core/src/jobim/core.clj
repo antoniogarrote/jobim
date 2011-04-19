@@ -4,8 +4,7 @@
   (:use [jobim.utils]
         [jobim.definitions]
         [clojure.contrib.logging :only [log]])
-  ;(:import [java.util.concurrent LinkedBlockingQueue])
-  (:import [java.util LinkedList]))
+  (:import [java.util LinkedList HashMap]))
 
 (defonce *messaging-service* nil)
 (defonce *coordination-service* nil)
@@ -21,14 +20,13 @@
 (def *rpc-table* (atom {}))
 (def *rpc-count* (atom 0))
 (def *links-table* (atom {}))
-(def *node-id* (atom nil))
+(def *node-id* nil)
 (def *local-name-register* (atom {}))
 
 ;; Coordination paths
 
 (defonce *node-app-znode* "/jobim")
 (defonce *node-nodes-znode* "/jobim/nodes")
-(defonce *node-processes-znode* "/jobim/processes")
 (defonce *node-messaging-znode* "/jobim/messaging")
 (defonce *node-names-znode* "/jobim/names")
 (defonce *node-links-znode* "/jobim/links")
@@ -55,72 +53,100 @@
 (defn msg-destiny-node
   "Returns the node identifier where the message must be sent"
   ([msg]
-     (if (nil? (:node msg))
-       (if (nil? (:to msg))
+     (if (nil? (get msg "node"))
+       (if (nil? (get msg "to"))
          (throw (Exception. "Message without destinatary PID or node"))
-         (pid-to-node-id (:to msg)))
-       (:node msg))))
+         (pid-to-node-id (get msg "to")))
+       (get msg "node"))))
 
 ;; protocol
 
+
 (defn protocol-process-msg
   ([from to msg]
-     {:type :msg
-      :topic :process
-      :to   to
-      :from from
-      :content msg}))
+     (let [msg-c (HashMap.)]
+       (.put msg-c "type" "msg")
+       (.put msg-c "topic" "process")
+       (.put msg-c "to" to)
+       (.put msg-c "from" from)
+       (.put msg-c "content" msg)
+       msg-c)))
 
 (defn protocol-rpc
   ([node from function args should-return internal-id]
-     {:type :msg
-      :topic :rpc
-      :from from
-      :node node
-      :content {:function      function
-                :args          args
-                :should-return should-return
-                :internal-id    internal-id}}))
+     (let [msg (HashMap.)
+           content (HashMap.)]
+       (.put content "function" function)
+       (.put content "args" args)
+       (.put content "should-return"  should-return)
+       (.put content "internal-id" internal-id)
+       (.put msg "type" "msg")
+       (.put msg "topic" "rpc")
+       (.put msg "from" from)
+       (.put msg "node" node)
+       (.put msg "content" content)
+       msg)))
 
 (defn protocol-link-new
   ([from to tx-name]
-     {:type :msg
-      :topic :link-new
-      :from from
-      :to   to
-      :content {:tx-name tx-name}}))
+     (let [content (HashMap.)
+           msg (HashMap.)]
+       (.put content "tx-name" tx-name)
+       (.put msg "content" content)
+       (.put msg "topic" "link-new")       
+       (.put msg "type" "msg")
+       (.put msg "from" from)
+       (.put msg "to" to)
+       msg)))
 
 (defn protocol-link-broken
   ([from to cause]
-     {:type  :signal
-      :topic :link-broken
-      :from from
-      :to   to
-      :content {:cause cause}}))
+     (let [content (HashMap.)
+           msg (HashMap.)]
+       (.put content "cause" cause)
+       (.put msg "content" content)
+       (.put msg "type" "signal")
+       (.put msg "topic" "link-broken")
+       (.put msg "from" from)
+       (.put msg "to" to)
+       msg)))
 
 (defn protocol-answer
   ([node value internal-id]
-     {:type :msg
-      :topic :rpc-response
-      :node  node
-      :content {:value value
-                :internal-id internal-id}}))
+     (let [msg (HashMap.)
+           content (HashMap.)]
+       (.put content "value" value)
+       (.put content "internal-id" internal-id)
+       (.put msg "content" content)
+       (.put msg "type" "msg")
+       (.put msg "topic" "rpc-response")
+       (.put msg "node" node)
+       msg)))
 
 (defn admin-msg
   ([command args from to]
-     {:type  :msg
-      :topic :admin
-      :from  from
-      :to    to
-      :content { :command command
-                 :args    args}}))
+     (let [msg (HashMap.)
+           content (HashMap.)]
+       (.put content "command" command)
+       (.put content "args" args)
+       (.put msg "content" content)
+       (.put msg "type" "msg")
+       (.put msg "topic" "admin")
+       (.put msg "from" from)
+       (.put msg "to" to)
+       msg)))
+
+;; signals
+
+(defn signal-link-broken
+  ([from cause]
+     {:cause cause
+      :signal :link-broken
+      :from from}))
 
 ;; utility functions
 
 ;; ;; ZooKeeper paths
-
-(defn zk-process-path
-  ([pid] (str *node-processes-znode* "/" pid)))
 
 ;; (defn zk-zeromq-node
 ;;   ([node] (str *node-messaging-zeromq-znode* "/" node)))
@@ -153,12 +179,12 @@
 (defn process-rpc
   "Process an incoming RPC request"
   ([msg]
-     (let [from (get msg :from)
-           content (get msg :content)
-           function (get content :function)
-           args     (get content :args)
-           should-return (get content :should-return)
-           internal-id (get content :internal-id)]
+     (let [from (get msg "from")
+           content (get msg "content")
+           function (get content "function")
+           args     (get content "args")
+           should-return (get content "should-return")
+           internal-id (get content "internal-id")]
        (try
         (let [f (eval-ns-fn function)
               result (apply f args)]
@@ -173,14 +199,15 @@
 
 (declare exists-pid?)
 (defn handle-link-request
-  ([msg] (let [from (:from msg)
-               to (:to msg)
-               tx-name (:tx-name (:content msg))]
-           (when (exists-pid? to)
+  ([msg] (let [from (get msg "from")
+               to (get msg "to")
+               tx-name (get (get msg "content") "tx-name")]
+           (if (exists-pid? to)
              ;; @todo add timeout here
              (let [result (commit *coordination-service* (zk-link-tx-path tx-name) to)]
                (when (= result "commit")
-                 (add-link tx-name to from)))))))
+                 (add-link tx-name to from)))
+             (rollback *coordination-service* (zk-link-tx-path tx-name) to)))))
 
 (declare pid-to-mbox)
 (declare pid-to-mbox-data)
@@ -191,37 +218,35 @@
 (declare send-to-evented)
 (defn dispatch-signal
   ([msg]
-     (condp = (keyword (:topic msg))
-         :link-broken (let [signal-msg {:signal :link-broken
-                                        :from (:from msg)
-                                        :cause (:cause (:content msg))}]
-                        (if (evented-process? (:to msg))
+     (condp = (keyword (get msg "topic"))
+         :link-broken (let [signal-msg (signal-link-broken (get msg "from") (get msg "cause"))]
+                        (if (evented-process? (get msg "to"))
                           (do
-                            (remove-link (:to msg) (:from msg))
-                            (send-to-evented (:to msg)
+                            (remove-link (get msg "to") (get msg "from"))
+                            (send-to-evented (get msg "to")
                                              signal-msg))
-                          (if-let [mbox (pid-to-mbox (:to msg))]
+                          (if-let [mbox (pid-to-mbox (get msg "to"))]
                             (do
-                              (remove-link (:to msg) (:from msg))
-                              (critical-message-dispatch (:to msg)
+                              (remove-link (get msg "to") (get msg "from"))
+                              (critical-message-dispatch (get msg "to")
                                                          signal-msg))))))))
 
 (defn dispatch-msg
   ([msg]
-     (condp = (keyword (:topic msg))
-       :process  (if (evented-process? (:to msg))
-                   (send-to-evented (:to msg) msg)
-                   (if-let [mbox (pid-to-mbox (:to msg))]
-                     (critical-message-dispatch (:to msg) (:content msg))))
+     (condp = (keyword (get msg "topic"))
+       :process  (if (evented-process? (get msg "to"))
+                   (send-to-evented (get msg "to") msg)
+                   (if-let [mbox (pid-to-mbox (get msg "to"))]
+                     (critical-message-dispatch (get msg "to") (get msg "content"))))
        :link-new (future (handle-link-request msg))
        :rpc     (future (process-rpc msg))
        :rpc-response (future (try
-                               (let [prom (rpc-id-to-promise (:internal-id (:content msg)))
-                                     val (:value (:content msg))]
+                               (let [prom (rpc-id-to-promise (get (get msg "content") "internal-id"))
+                                     val (get (get msg "content") "value")]
                                  (when (not (nil? prom))
                                    (do
                                      (deliver prom val)
-                                     (remove-rpc-promise (:internal-id (:content msg))))))
+                                     (remove-rpc-promise (get (get msg "content") "internal-id")))))
                               (catch Exception ex (log :error (str "*** Error processing rpc-response: " (.getMessage ex)))))))))
 
 (defn node-dispatcher-thread
@@ -231,7 +256,7 @@
                       (fn [msg]
                         (try
                           (do
-                            (condp = (keyword (:type msg))
+                            (condp = (keyword (get msg "type"))
                                 :msg (dispatch-msg msg)
                                 :signal (dispatch-signal msg)
                                 (log :error (str "*** " name " , " (java.util.Date.) " uknown message type for : " msg))))
@@ -278,7 +303,7 @@
                         messaging-type messaging-args
                         serialization-type serialization-args)
        ;; store node configuration
-       (swap! *node-id* (fn [_] id))
+       (alter-var-root #'*node-id* (fn [_] id))
        ;; Launch evented processing of events
        (jevts/run-multiplexer 1 ;;(num-processors)
                               )
@@ -314,7 +339,7 @@
 
 (defn node
   "Returns the identifier of the current node"
-  ([] @*node-id*))
+  ([] *node-id*))
 
 (defn nodes
   "Returns all the available nodes and their identifiers"
@@ -326,7 +351,7 @@
 
 (defn- next-process-id
   ([] (let [rpid (swap! *process-count* (fn [old] (inc old)))
-            lpid (deref *node-id*)]
+            lpid *node-id*]
         (str lpid "." rpid))))
 
 (defn- next-rpc-id
@@ -369,7 +394,7 @@
   ([rpc-id]
      (swap! *rpc-table* (fn [table] (dissoc table rpc-id)))))
 
-(defn- exists-pid?
+(defn exists-pid?
   ([pid] (not (nil? (get @*process-table* (pid-to-process-number pid))))))
 
 (defn pid-to-mbox
@@ -401,7 +426,6 @@
   ([pid]
      (let [registered (dictionary-get pid :registered-name)
            registered-local (dictionary-get pid :registered-name-local)]
-       (delete *coordination-service* (zk-process-path pid))
        (when (not (nil? registered))
          (delete *coordination-service* (str *node-names-znode* "/" registered)))
        (when (not (nil? registered-local))
@@ -433,42 +457,33 @@
 
 (declare self)
 (defn remote-send
-  ([node pid msg]
-     (if (exists? *coordination-service* (zk-process-path pid))
-       (let [msg (if (and (= (map? msg))
-                          (= :signal (keyword (:type msg))))
-                   msg
-                   (protocol-process-msg (self) pid msg))]
-         (publish *messaging-service* msg))
-       (throw (Exception. (str "Non existent remote process " pid))))))
+  ([node pid msg]     
+     (let [msg (if (and (= (map? msg))
+                        (= :signal (keyword (get msg "type"))))
+                 msg
+                 (protocol-process-msg (self) pid msg))]
+       (publish *messaging-service* msg))
+     (throw (Exception. (str "Non existent remote process " pid)))))
 
 (defn process-info
   "Returns information about the process identified by the provided PID"
   ([pid]
      (let [node (pid-to-node-id pid)]
-       (if (= node @*node-id*)
+       (if (= node *node-id*)
          ;; The process is in this node
          (let [id (pid-to-process-number pid)
                info (get @*process-table* id)]
            (if (nil? info) nil {:pid pid :node node :alive true}))
-         ;; The process is in a different node
-         (if (exists? *coordination-service* (zk-process-path pid))
-           {:pid pid :node node :alive true}
-           nil)))))
+         nil))))
 
 (defn admin-send
   ([node pid msg]
-     (if (exists? *coordination-service* (zk-process-path pid))
-       (do
-         (publish *messaging-service* msg))
-       (throw (Exception. (str "Non existent remote process " pid))))))
+     (publish *messaging-service* msg)))
 
 (defn- initialize-actor
   ([is-evented]
      (let [^String pid (next-process-id)]
        (register-local-mailbox pid is-evented)
-       (create *coordination-service* (zk-process-path pid) " ")
-       (set-data *coordination-service* (zk-process-path pid) "running")
        pid)))
 
 (defn spawn
@@ -513,19 +528,22 @@
 (defn send!
   "Sends a message to a local/remote process"
   ([pid msg]
-     (let [node (pid-to-node-id pid)]
-       (if (= node @*node-id*)
-         (if (and (= (map? msg))
-                  (= :signal (keyword (:type msg))))
-           (dispatch-signal msg)
-           (if (evented-process? pid)
-             (do (send-to-evented pid (protocol-process-msg (self) pid msg))
-                 :ok)
-             (let [mbox (pid-to-mbox pid)
-                   mbox-data (pid-to-mbox-data pid)]
-               (critical-message-dispatch pid msg)
-               :ok)))
-         (remote-send node pid msg)))))
+     (try
+       (let [node (pid-to-node-id pid)]
+         (if (= node *node-id*)
+           (if (and (= (map? msg))
+                    (= :signal (keyword (get msg "type"))))
+             (dispatch-signal msg)
+             (if (evented-process? pid)
+               (do (send-to-evented pid (protocol-process-msg (self) pid msg))
+                   :ok)
+               (let [mbox (pid-to-mbox pid)
+                     mbox-data (pid-to-mbox-data pid)]
+                 (critical-message-dispatch pid msg)
+                 :ok)))
+           (remote-send node pid msg)))
+       (catch Exception ex
+         :ok))))
 
 (declare critical-message-reception)
 (declare critical-message-selective-reception)
@@ -643,7 +661,7 @@
          (binding [*pid* pid
                    *mbox* mbox
                    *mbox-data* mbox-data]
-           (let [result (f (:content (:data data)))]
+           (let [result (f (get (:data data) "content"))]
              (when (not= result :evented-loop-continue)
                (try (clean-process pid)
                     (catch Exception ex
@@ -712,7 +730,7 @@
                callee (atom nil)
                callback (fn [data]
                           (let [pid (react-to-pid (:key data))
-                                msg (:content (:data data))]
+                                msg (get (get data :data) "content")]
                             (if (mbox-filter msg)
                               (data-handler data)
                               (let [^LinkedList this-save-queue (:save-queue (pid-to-mbox-data pid))]
@@ -755,7 +773,6 @@
            react-loop-id (get env :loop)]
        (try (do
               (clean-process pid)
-              ;(println (str "FINISHING LOOP " react-loop-id))
               (jevts/finish react-loop-id))
             (catch Exception ex
               (log :error (str "Error cleaning evented process "
@@ -766,8 +783,7 @@
   ([vals f]
      (let [react-loop-id (str (self) ":react-loop-" (random-uuid))]
        (jevts/listen react-loop-id
-                     (fn [data] (let [;_ (println (str "*** REACT LOOP"))
-                                     pid (react-to-pid (:key data))
+                     (fn [data] (let [pid (react-to-pid (:key data))
                                      old-map (get @*evented-table* (pid-to-process-number pid))
                                      mbox (:mbox old-map)
                                      env (:env old-map)
@@ -777,7 +793,7 @@
                                                                         (assoc old-map :env envp))))]
                                  (binding [*pid* pid
                                            *mbox* mbox]
-                                   (let [result (apply f (:data data))]
+                                   (let [result (apply f (get data :data))]
                                      (when (not= result :evented-loop-continue)
                                        (react-break)))))))
        (apply jevts/publish [react-loop-id vals])
@@ -794,7 +810,7 @@
                          (binding [*pid* pid
                                    *mbox* mbox
                                    *mbox-data* mbox-data]
-                           (let [result (handler (:data data))]
+                           (let [result (handler (get data :data))]
                              (when (not= result :evented-loop-continue)
                                (try (clean-process pid)
                                     (jevts/finish future-msg)

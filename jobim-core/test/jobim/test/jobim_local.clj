@@ -36,7 +36,7 @@
    (let [prom (promise)
          prom2 (promise)
          prom3 (promise)
-         pid2 (spawn (fn [] (let [m (receive)] (println (str "received 1")) (deliver prom m))))
+         pid2 (spawn (fn [] (let [m (receive)] (deliver prom m))))
          pid3 (spawn (fn [] (link (resolve-name "remoteping"))
                        (deliver prom2 "go on")
                        (let [m (receive)]
@@ -47,6 +47,22 @@
      (send! (resolve-name "remoteping") "exception")
      (is (= (:signal @prom3) :link-broken)))))
 
+
+(deftest test-process-alive
+  (println "*** test-process-alive")
+  (let [prom (promise)
+        pid (spawn (fn [] (let [m (receive)] (deliver prom m))))]
+    (is (process-alive? pid))
+    (send! pid :exit)
+    (Thread/sleep 1000)
+    @prom
+    (is (not (process-alive? pid)))))
+
+(deftest test-sending-non-existent
+  (println "*** test-sending-non-existent")
+  (let [pid (spawn (fn [] :nothing))]
+    (is (not (process-alive? pid)))
+    (is (= :ok (send! pid :something)))))
 
 (deftest test-send
   (println "*** test-send")

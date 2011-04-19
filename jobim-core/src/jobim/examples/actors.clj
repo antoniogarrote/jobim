@@ -31,10 +31,11 @@
        (react-loop [should-exit false]
          (when (not should-exit)
            (react [msg]
+                  (do
                   (cond-match
                    [#"exit" msg]       (react-recur true)
                    [[?from ?data] msg] (do (send! from (str "actor " name " says " data))
-                                           (react-recur false)))))))))
+                                           (react-recur false))))))))))
 
 ;; benchmark actors
 

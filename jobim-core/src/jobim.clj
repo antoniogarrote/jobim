@@ -118,6 +118,10 @@
   "Breaks an evented recursion loop"
   ([] (apply core/react-break [])))
 
+(defn process-alive?
+  "Returns true if the process is alive in the current node, false otherwise"
+  ([pid] (apply core/exists-pid? [pid])))
+
 (defn bootstrap-node
   "Adds a new node to the Jobim cluster"
   ([file]
