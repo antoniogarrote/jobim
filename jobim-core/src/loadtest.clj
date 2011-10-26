@@ -55,7 +55,7 @@
 (def-server Cell
 
   (init [this [id]]
-        (if (= id *first-cell*)          
+        (if (= id *first-cell*)
           {:id id :next (atom (self)) :counter (atom 0) :out (writer "out.txt")}
           {:id id :next (atom (self)) :counter (atom 0)}))
 

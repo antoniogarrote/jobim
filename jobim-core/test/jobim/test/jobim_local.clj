@@ -112,7 +112,7 @@
     (is (= :open (state fsm)))
     (lock fsm)
     (is (= :locked (state fsm)))))
- 
+
 (deftest test-server-1
   (println "*** test-server1")
   (let [server (jserver/make-channel-manager)
@@ -120,7 +120,7 @@
     (is (not (nil? chn)))
     (jserver/free server chn)
     (is (= chn (jserver/alloc server)))))
- 
+
 (deftest test-server-2
   (println "*** test-server2")
   (let [server (jserver/make-channel-manager-evented)

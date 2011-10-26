@@ -93,7 +93,7 @@
            msg (HashMap.)]
        (.put content "tx-name" tx-name)
        (.put msg "content" content)
-       (.put msg "topic" "link-new")       
+       (.put msg "topic" "link-new")
        (.put msg "type" "msg")
        (.put msg "from" from)
        (.put msg "to" to)
@@ -408,7 +408,7 @@
 (defn dictionary-write
   ([pid key value]
      (let []
-       
+
        (swap! *process-table* (fn [table] (let [process-number (pid-to-process-number pid)
                                                ptable (get table process-number)
                                                dictionary (:dictionary  ptable)
@@ -457,7 +457,7 @@
 
 (declare self)
 (defn remote-send
-  ([node pid msg]     
+  ([node pid msg]
      (let [msg (if (and (= (map? msg))
                         (= :signal (keyword (get msg "type"))))
                  msg
@@ -684,7 +684,7 @@
                                          old-process-data (get t (pid-to-process-number pid))]
                                      (assoc t (pid-to-process-number pid)
                                             (assoc old-process-data :mbox-data mbox-data-p)))))))
-  
+
 (defn- do-save-queue
   "Tries to find a matching event in the saved queue for the handler of an evented actor"
   ([mbox-filter ^LinkedList save-queue]
@@ -694,7 +694,7 @@
             matching-msg nil]
        ;; End of the saved queue
        (if (nil? msg)
-         [matching-msg new-save-queue]   
+         [matching-msg new-save-queue]
        ;; another item in the saved queue
        (if (and (nil? matching-msg) (mbox-filter msg))
          ;; we found a mathching message

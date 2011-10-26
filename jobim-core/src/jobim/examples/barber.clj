@@ -53,11 +53,11 @@
          (let [seated (do (send! (resolve-name "barber-shop") [:get-seat (self)])
                           (receive))]
            ;; we have a seat, wait to have a hair cut
-           (if (= seated :seated) 
+           (if (= seated :seated)
              (let [_ (send! (resolve-name "the-barber") :hey) ;; Awaking the barber
                    msg (receive)]
                ;; barber starting to do his thing
-               (when (= msg :cutting) 
+               (when (= msg :cutting)
                  (notify-shop (str "Customer " id " getting his hair cut")))
                ;; barber finished
                (let [msg (receive)]
@@ -110,7 +110,7 @@
      (start-event-manager "barber-manager")
      (add-handler (resolve-name "barber-manager")
                   [name jobim.examples.barber.BarberLogger]
-                  nil)     
+                  nil)
      (shop num-seats num-clients)
      (barber)
      (loop [ids (range 0 num-clients)
