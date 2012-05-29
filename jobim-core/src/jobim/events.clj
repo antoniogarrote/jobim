@@ -51,15 +51,15 @@
 
 (defn- process-publish
   ([key data]
-     
+
      (let [^LinkedList queue (get *events-queues* key)
            handler (get *events-handlers* key)]
-       
+
        (when (and (nil? queue) (nil? handler))
          (let [queue (LinkedList.)]
            (.add queue data)
            (.put *events-queues* key queue)))
-         
+
        (when (and (nil? queue) (not (nil? handler)))
          (let [{:keys [handler kind]} handler]
            (if (= :persistent kind)

@@ -15,6 +15,6 @@
                  "repository.jboss.org" "http://repository.jboss.org/nexus/content/groups/public"}
   :dev-dependencies [[leiningen/lein-swank "1.2.0-SNAPSHOT"]
                      [cdt "1.2"]]
-;  :jvm-opts ["-Xmn3072m -Xmx3072m -Xincgc"] 
-;  :jvm-opts ["-Xmn3072m -Xmx3072m"]   
+;  :jvm-opts ["-Xmn3072m -Xmx3072m -Xincgc"]
+;  :jvm-opts ["-Xmn3072m -Xmx3072m"]
   :aot :all)

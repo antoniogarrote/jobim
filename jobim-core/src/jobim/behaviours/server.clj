@@ -76,9 +76,9 @@
                      [[:server-call ?pid ?from ?request] msg]  (do-server-call server from request state)
                      ;; Cast
                      [[:server-cast ?request] msg]             (do-server-cast server request state)
-                     ;; Terminate                               
+                     ;; Terminate
                      [:terminate msg]                          (do (terminate server state) :norecur)
-                     ;; Info                                    
+                     ;; Info
                      [_ msg]                                   (do-handle-info server msg state))]
          (when (not= result :norecur)
            (recur (receive) (second result)))))))
@@ -93,9 +93,9 @@
                        [[:server-call ?pid ?from ?request] msg]  (do-server-call server from request state)
                        ;; Cast
                        [[:server-cast ?request] msg]             (do-server-cast server request state)
-                       ;; Terminate                               
+                       ;; Terminate
                        [:terminate msg]                          (do (terminate server state) :norecur)
-                       ;; Info                                    
+                       ;; Info
                        [_ msg]                                   (do-handle-info server msg state))]
            (when (not= result :norecur)
              (react-recur (second result))))))))
